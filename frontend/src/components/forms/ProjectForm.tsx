@@ -1,0 +1,175 @@
+import { useState, useEffect } from "react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { api } from "@/api/client"
+import type { Profile, Project, ProjectCreate } from "@/types"
+
+interface ProjectFormProps {
+  project?: Project // If provided, we're editing; otherwise creating
+  onSuccess?: () => void
+  onCancel?: () => void
+}
+
+export function ProjectForm({ project, onSuccess, onCancel }: ProjectFormProps) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [customers, setCustomers] = useState<Profile[]>([])
+
+  const isEditing = !!project
+
+  const [name, setName] = useState("")
+  const [customerId, setCustomerId] = useState<string>("")
+  const [status, setStatus] = useState<string>("active")
+  const [ucshProjectNumber, setUcshProjectNumber] = useState("")
+
+  useEffect(() => {
+    const fetchCustomers = async () => {
+      try {
+        const data = await api.profiles.getAll("customer")
+        setCustomers(data)
+      } catch {
+        setError("Failed to load customers")
+      }
+    }
+    fetchCustomers()
+  }, [])
+
+  // Populate form when editing
+  useEffect(() => {
+    if (project) {
+      setName(project.name)
+      setCustomerId(project.customer_id.toString())
+      setStatus(project.status)
+      setUcshProjectNumber(project.ucsh_project_number || "")
+    }
+  }, [project])
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!customerId) return
+
+    setLoading(true)
+    setError(null)
+
+    const projectData: ProjectCreate = {
+      name,
+      customer_id: parseInt(customerId),
+      status,
+      ucsh_project_number: ucshProjectNumber || undefined,
+    }
+
+    try {
+      if (isEditing && project) {
+        await api.projects.update(project.id, projectData)
+      } else {
+        await api.projects.create(projectData)
+      }
+      onSuccess?.()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to ${isEditing ? 'update' : 'create'} project`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {error && (
+        <div className="text-sm text-destructive bg-destructive/10 p-3 rounded-md border border-destructive/20">
+          {error}
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <Label htmlFor="name">Project Name</Label>
+        <Input
+          id="name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g., Office Renovation 2024"
+          required
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="customer">Customer</Label>
+        {customers.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No customers found. Please create a customer first.
+          </p>
+        ) : (
+          <Select value={customerId} onValueChange={setCustomerId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select a customer" />
+            </SelectTrigger>
+            <SelectContent>
+              {customers.map((customer) => (
+                <SelectItem key={customer.id} value={customer.id.toString()}>
+                  {customer.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="status">Status</Label>
+        <Select value={status} onValueChange={setStatus}>
+          <SelectTrigger>
+            <SelectValue placeholder="Select status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="completed">Completed</SelectItem>
+            <SelectItem value="on_hold">On Hold</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="ucsh">UCSH Project Number (Optional)</Label>
+        <Input
+          id="ucsh"
+          value={ucshProjectNumber}
+          onChange={(e) => setUcshProjectNumber(e.target.value)}
+          placeholder="e.g., UCSH-2024-001"
+        />
+      </div>
+
+      {isEditing && project && (
+        <>
+          <div className="space-y-2">
+            <Label>UCA Project Number</Label>
+            <Input value={project.uca_project_number} disabled className="bg-muted" />
+          </div>
+          <div className="space-y-2">
+            <Label>Created On</Label>
+            <Input
+              value={new Date(project.created_on).toLocaleDateString()}
+              disabled
+              className="bg-muted"
+            />
+          </div>
+        </>
+      )}
+
+      <div className="flex justify-end gap-2 pt-4">
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={loading || !name || !customerId || customers.length === 0}>
+          {loading ? (isEditing ? "Saving..." : "Creating...") : (isEditing ? "Save Changes" : "Create Project")}
+        </Button>
+      </div>
+    </form>
+  )
+}
