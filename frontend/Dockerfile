@@ -22,14 +22,18 @@ RUN npm run build
 # Stage 2: Serve with nginx
 FROM nginx:alpine
 
-# Copy custom nginx configuration
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Copy custom nginx configuration template
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 
 # Copy built assets from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Expose port 80
-EXPOSE 80
+# Railway provides PORT env variable, default to 80 for local
+ENV PORT=80
 
-# Start nginx
+# Expose the port (documentation only)
+EXPOSE ${PORT}
+
+# nginx:alpine image automatically processes templates in /etc/nginx/templates/
+# and substitutes environment variables, outputting to /etc/nginx/conf.d/
 CMD ["nginx", "-g", "daemon off;"]
