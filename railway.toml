@@ -1,10 +1,58 @@
-# Railway configuration for monorepo
-# Each service should set its Root Directory in Railway dashboard:
-# - Backend service: root directory = "backend"
-# - Frontend service: root directory = "frontend"
-
-[build]
-# This file exists to document the monorepo structure
-# Individual services are configured via their respective directories:
-# - backend/railway.toml
-# - frontend/Dockerfile
+# UC Velocity ERP - Railway Deployment Guide
+#
+# This is a monorepo with two services:
+#   - backend/  (FastAPI + PostgreSQL)
+#   - frontend/ (React + Vite + nginx)
+#
+# ============================================================================
+# QUICK START - Deploy to Railway
+# ============================================================================
+#
+# STEP 1: Create Railway Project
+#   - Go to railway.app → New Project → Deploy from GitHub repo
+#   - Select this repository
+#   - Cancel the initial auto-deploy (we need to configure first)
+#
+# STEP 2: Add PostgreSQL Database
+#   - Click "+ New" → "Database" → "Add PostgreSQL"
+#   - Wait for it to provision (~30 seconds)
+#
+# STEP 3: Deploy Backend
+#   - Click "+ New" → "GitHub Repo" → select this repo
+#   - Go to Settings → set Root Directory to: backend
+#   - Go to Variables:
+#     → Click "Add Reference" → select PostgreSQL → DATABASE_URL
+#     → Add CORS_ORIGINS (leave empty for now, add frontend URL later)
+#   - Go to Settings → Networking → Generate Domain
+#   - Copy the backend URL
+#
+# STEP 4: Deploy Frontend
+#   - Click "+ New" → "GitHub Repo" → select this repo
+#   - Go to Settings → set Root Directory to: frontend
+#   - Go to Variables:
+#     → Add VITE_API_BASE = https://<your-backend-url>.up.railway.app
+#   - Go to Settings → Networking → Generate Domain
+#   - Copy the frontend URL
+#
+# STEP 5: Configure CORS
+#   - Go back to Backend service → Variables
+#   - Set CORS_ORIGINS = https://<your-frontend-url>.up.railway.app
+#
+# STEP 6: Verify
+#   - Backend: https://<backend-url>/health → {"status": "healthy"}
+#   - Backend: https://<backend-url>/docs → Swagger UI
+#   - Frontend: https://<frontend-url>/ → React app loads
+#
+# ============================================================================
+# Environment Variables Reference
+# ============================================================================
+#
+# BACKEND (backend/):
+#   DATABASE_URL    - Required. PostgreSQL connection string (from Railway)
+#   CORS_ORIGINS    - Optional. Comma-separated allowed origins
+#   PORT            - Auto-injected by Railway
+#
+# FRONTEND (frontend/):
+#   VITE_API_BASE   - Required. Backend API URL for API calls
+#
+# ============================================================================

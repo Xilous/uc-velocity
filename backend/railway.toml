@@ -1,3 +1,17 @@
+# UC Velocity ERP - Backend Service Configuration
+#
+# SETUP INSTRUCTIONS:
+# 1. Create new Railway project
+# 2. Add PostgreSQL database (+ New → Database → PostgreSQL)
+# 3. Add this service (+ New → GitHub Repo → select uc-velocity)
+# 4. Set Root Directory to: backend
+# 5. Add DATABASE_URL variable (reference from PostgreSQL)
+# 6. Add CORS_ORIGINS variable with frontend URL after frontend is deployed
+#
+# Required Environment Variables:
+#   DATABASE_URL    - PostgreSQL connection string (from Railway PostgreSQL)
+#   CORS_ORIGINS    - Frontend URL for CORS (e.g., https://your-frontend.up.railway.app)
+
 [build]
 builder = "nixpacks"
 

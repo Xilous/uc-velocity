@@ -1,0 +1,22 @@
+# UC Velocity ERP - Frontend Service Configuration
+#
+# SETUP INSTRUCTIONS:
+# 1. In same Railway project as backend
+# 2. Add this service (+ New → GitHub Repo → select uc-velocity)
+# 3. Set Root Directory to: frontend
+# 4. Add VITE_API_BASE variable with backend URL
+#
+# Required Environment Variables:
+#   VITE_API_BASE   - Backend API URL (e.g., https://your-backend.up.railway.app)
+#
+# Note: This service uses a Dockerfile for multi-stage build (Node → nginx)
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 100
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
