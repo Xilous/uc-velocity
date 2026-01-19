@@ -1,0 +1,10 @@
+# Railway configuration for monorepo
+# Each service should set its Root Directory in Railway dashboard:
+# - Backend service: root directory = "backend"
+# - Frontend service: root directory = "frontend"
+
+[build]
+# This file exists to document the monorepo structure
+# Individual services are configured via their respective directories:
+# - backend/railway.toml
+# - frontend/Dockerfile
