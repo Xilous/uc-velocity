@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import {
   Dialog,
   DialogContent,
@@ -19,7 +20,7 @@ import {
 import { ProjectForm } from "@/components/forms/ProjectForm"
 import { api } from "@/api/client"
 import type { Project } from "@/types"
-import { Plus, Trash2, Pencil, FolderOpen } from "lucide-react"
+import { Plus, Trash2, Pencil, FolderOpen, Search } from "lucide-react"
 
 interface ProjectsPageProps {
   onSelectProject: (projectId: number) => void
@@ -31,6 +32,7 @@ export function ProjectsPage({ onSelectProject }: ProjectsPageProps) {
   const [error, setError] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
+  const [searchTerm, setSearchTerm] = useState("")
 
   const fetchData = async () => {
     setLoading(true)
@@ -91,6 +93,19 @@ export function ProjectsPage({ onSelectProject }: ProjectsPageProps) {
     }
   }
 
+  const filteredProjects = projects.filter((project) => {
+    const term = searchTerm.toLowerCase()
+    if (!term) return true
+    return (
+      project.name.toLowerCase().includes(term) ||
+      project.uca_project_number.toLowerCase().includes(term) ||
+      (project.ucsh_project_number?.toLowerCase().includes(term) ?? false) ||
+      project.customer.name.toLowerCase().includes(term) ||
+      (project.project_lead?.toLowerCase().includes(term) ?? false) ||
+      project.status.toLowerCase().includes(term)
+    )
+  })
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -110,12 +125,24 @@ export function ProjectsPage({ onSelectProject }: ProjectsPageProps) {
         </div>
       )}
 
+      <div className="relative max-w-sm">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder="Search projects..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="pl-9"
+        />
+      </div>
+
       <div className="bg-card rounded-lg border shadow-sm">
         {loading ? (
           <div className="p-8 text-center text-muted-foreground">Loading...</div>
-        ) : projects.length === 0 ? (
+        ) : filteredProjects.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground">
-            No projects found. Create your first project to get started.
+            {projects.length === 0
+              ? "No projects found. Create your first project to get started."
+              : "No projects match your search."}
           </div>
         ) : (
           <Table>
@@ -125,13 +152,14 @@ export function ProjectsPage({ onSelectProject }: ProjectsPageProps) {
                 <TableHead>UCSH #</TableHead>
                 <TableHead>Project Name</TableHead>
                 <TableHead>Customer</TableHead>
+                <TableHead>Project Lead</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Created On</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {projects.map((project) => (
+              {filteredProjects.map((project) => (
                 <TableRow
                   key={project.id}
                   className="cursor-pointer hover:bg-muted/50"
@@ -146,6 +174,7 @@ export function ProjectsPage({ onSelectProject }: ProjectsPageProps) {
                     </div>
                   </TableCell>
                   <TableCell>{project.customer.name}</TableCell>
+                  <TableCell className="text-muted-foreground">{project.project_lead || "-"}</TableCell>
                   <TableCell>{getStatusBadge(project.status)}</TableCell>
                   <TableCell className="text-muted-foreground">
                     {new Date(project.created_on).toLocaleDateString()}

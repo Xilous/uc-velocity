@@ -29,6 +29,17 @@ export function ProjectForm({ project, onSuccess, onCancel }: ProjectFormProps) 
   const [customerId, setCustomerId] = useState<string>("")
   const [status, setStatus] = useState<string>("active")
   const [ucshProjectNumber, setUcshProjectNumber] = useState("")
+  const [projectLead, setProjectLead] = useState<string>("")
+
+  // Derive contacts from selected customer
+  const selectedCustomer = customers.find(c => c.id.toString() === customerId)
+  const availableContacts = selectedCustomer?.contacts || []
+
+  // Handle customer change - reset project lead when customer changes
+  const handleCustomerChange = (value: string) => {
+    setCustomerId(value)
+    setProjectLead("") // Reset project lead when customer changes
+  }
 
   useEffect(() => {
     const fetchCustomers = async () => {
@@ -49,6 +60,7 @@ export function ProjectForm({ project, onSuccess, onCancel }: ProjectFormProps) 
       setCustomerId(project.customer_id.toString())
       setStatus(project.status)
       setUcshProjectNumber(project.ucsh_project_number || "")
+      setProjectLead(project.project_lead || "")
     }
   }, [project])
 
@@ -64,6 +76,7 @@ export function ProjectForm({ project, onSuccess, onCancel }: ProjectFormProps) 
       customer_id: parseInt(customerId),
       status,
       ucsh_project_number: ucshProjectNumber || undefined,
+      project_lead: projectLead || undefined,
     }
 
     try {
@@ -106,7 +119,7 @@ export function ProjectForm({ project, onSuccess, onCancel }: ProjectFormProps) 
             No customers found. Please create a customer first.
           </p>
         ) : (
-          <Select value={customerId} onValueChange={setCustomerId}>
+          <Select value={customerId} onValueChange={handleCustomerChange}>
             <SelectTrigger>
               <SelectValue placeholder="Select a customer" />
             </SelectTrigger>
@@ -114,6 +127,37 @@ export function ProjectForm({ project, onSuccess, onCancel }: ProjectFormProps) 
               {customers.map((customer) => (
                 <SelectItem key={customer.id} value={customer.id.toString()}>
                   {customer.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="projectLead">Project Lead (Optional)</Label>
+        {!customerId ? (
+          <p className="text-sm text-muted-foreground">
+            Select a customer first to choose a project lead.
+          </p>
+        ) : availableContacts.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No contacts found for this customer.
+          </p>
+        ) : (
+          <Select value={projectLead} onValueChange={setProjectLead}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select a project lead (optional)" />
+            </SelectTrigger>
+            <SelectContent>
+              {availableContacts.map((contact) => (
+                <SelectItem key={contact.id} value={contact.name}>
+                  {contact.name}
+                  {contact.job_title && (
+                    <span className="text-muted-foreground ml-2">
+                      ({contact.job_title})
+                    </span>
+                  )}
                 </SelectItem>
               ))}
             </SelectContent>

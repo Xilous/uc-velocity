@@ -119,6 +119,7 @@ def create_project(project_data: ProjectCreate, db: Session = Depends(get_db)):
         status=project_data.status,
         ucsh_project_number=project_data.ucsh_project_number,
         uca_project_number=uca_number,
+        project_lead=project_data.project_lead,
     )
     db.add(db_project)
     db.commit()
@@ -147,6 +148,8 @@ def update_project(project_id: int, project_data: ProjectUpdate, db: Session = D
         db_project.status = project_data.status
     if project_data.ucsh_project_number is not None:
         db_project.ucsh_project_number = project_data.ucsh_project_number
+    if project_data.project_lead is not None:
+        db_project.project_lead = project_data.project_lead
     if project_data.customer_id is not None:
         # Verify new customer exists and is of type CUSTOMER
         customer = db.query(Profile).filter(Profile.id == project_data.customer_id).first()

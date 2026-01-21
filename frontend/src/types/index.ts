@@ -150,6 +150,7 @@ export interface Project {
   status: string;
   ucsh_project_number: string | null;
   uca_project_number: string;
+  project_lead: string | null;
   customer: Profile;
 }
 
@@ -158,6 +159,7 @@ export interface ProjectCreate {
   customer_id: number;
   status?: string;
   ucsh_project_number?: string;
+  project_lead?: string;
 }
 
 export interface ProjectUpdate {
@@ -165,6 +167,7 @@ export interface ProjectUpdate {
   customer_id?: number;
   status?: string;
   ucsh_project_number?: string;
+  project_lead?: string | null;
 }
 
 export interface ProjectFull extends Project {

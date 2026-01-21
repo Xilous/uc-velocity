@@ -142,6 +142,7 @@ class Project(Base):
     status = Column(String, default="active")
     ucsh_project_number = Column(String, nullable=True)
     uca_project_number = Column(String, unique=True, nullable=False)
+    project_lead = Column(String, nullable=True)  # Static contact name
 
     # Relationships
     customer = relationship("Profile", back_populates="projects")

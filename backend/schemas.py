@@ -236,6 +236,7 @@ class ProjectBase(BaseModel):
     customer_id: int
     status: str = "active"
     ucsh_project_number: Optional[str] = None
+    project_lead: Optional[str] = None
 
 
 class ProjectCreate(ProjectBase):
@@ -247,6 +248,7 @@ class ProjectUpdate(BaseModel):
     customer_id: Optional[int] = None
     status: Optional[str] = None
     ucsh_project_number: Optional[str] = None
+    project_lead: Optional[str] = None
 
 
 class Project(ProjectBase):
