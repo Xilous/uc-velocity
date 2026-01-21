@@ -90,8 +90,10 @@ def get_project(project_id: int, db: Session = Depends(get_db)):
         .options(
             joinedload(Project.customer),
             joinedload(Project.quotes).joinedload(Quote.line_items),
-            joinedload(Project.purchase_orders).joinedload(PurchaseOrder.vendor),
-            joinedload(Project.purchase_orders).joinedload(PurchaseOrder.line_items)
+            joinedload(Project.purchase_orders).options(
+                joinedload(PurchaseOrder.vendor),
+                joinedload(PurchaseOrder.line_items)
+            )
         )
         .filter(Project.id == project_id)
         .first()
