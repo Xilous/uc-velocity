@@ -224,6 +224,7 @@ export interface Quote {
   status: QuoteStatus;
   current_version: number;
   client_po_number?: string | null;
+  work_description?: string | null;
   line_items: QuoteLineItem[];
 }
 
@@ -231,11 +232,13 @@ export interface QuoteCreate {
   project_id: number;
   status?: QuoteStatus;
   client_po_number?: string;
+  work_description?: string;
 }
 
 export interface QuoteUpdate {
   status?: QuoteStatus;
   client_po_number?: string | null;
+  work_description?: string | null;
 }
 
 // ===== PO Line Items =====

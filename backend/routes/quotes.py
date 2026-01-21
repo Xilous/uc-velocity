@@ -143,7 +143,8 @@ def create_quote(quote_data: QuoteCreate, db: Session = Depends(get_db)):
     db_quote = Quote(
         project_id=quote_data.project_id,
         status=quote_data.status,
-        client_po_number=quote_data.client_po_number
+        client_po_number=quote_data.client_po_number,
+        work_description=quote_data.work_description
     )
     db.add(db_quote)
     db.commit()
@@ -165,6 +166,9 @@ def update_quote(quote_id: int, quote_data: QuoteUpdate, db: Session = Depends(g
 
     if quote_data.client_po_number is not None:
         db_quote.client_po_number = quote_data.client_po_number.strip() or None
+
+    if quote_data.work_description is not None:
+        db_quote.work_description = quote_data.work_description.strip() or None
 
     db.commit()
     db.refresh(db_quote)

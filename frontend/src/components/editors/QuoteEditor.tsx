@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -96,6 +97,11 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
   const [isEditingClientPo, setIsEditingClientPo] = useState(false)
   const [savingClientPo, setSavingClientPo] = useState(false)
 
+  // Work Description editing
+  const [workDescription, setWorkDescription] = useState("")
+  const [isEditingWorkDescription, setIsEditingWorkDescription] = useState(false)
+  const [savingWorkDescription, setSavingWorkDescription] = useState(false)
+
   const fetchQuote = async () => {
     setLoading(true)
     setError(null)
@@ -103,6 +109,7 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
       const data = await api.quotes.get(quoteId)
       setQuote(data)
       setClientPoNumber(data.client_po_number || "")
+      setWorkDescription(data.work_description || "")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch quote")
     } finally {
@@ -305,6 +312,20 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
       alert(err instanceof Error ? err.message : "Failed to update Client PO Number")
     } finally {
       setSavingClientPo(false)
+    }
+  }
+
+  const handleSaveWorkDescription = async () => {
+    setSavingWorkDescription(true)
+    try {
+      await api.quotes.update(quoteId, { work_description: workDescription.trim() || null })
+      setIsEditingWorkDescription(false)
+      fetchQuote()
+      onUpdate?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update Work Description")
+    } finally {
+      setSavingWorkDescription(false)
     }
   }
 
@@ -681,6 +702,58 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
             <p className="text-sm text-amber-600 mt-2">
               A Client PO Number is required before you can create an invoice.
             </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Work Description */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            Work Description
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isEditingWorkDescription ? (
+            <div className="space-y-2">
+              <Textarea
+                value={workDescription}
+                onChange={(e) => setWorkDescription(e.target.value)}
+                placeholder="Describe the work covered by this quote..."
+                rows={4}
+              />
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={handleSaveWorkDescription}
+                  disabled={savingWorkDescription}
+                >
+                  {savingWorkDescription ? "Saving..." : "Save"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setWorkDescription(quote.work_description || "")
+                    setIsEditingWorkDescription(false)
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-start gap-2">
+              {quote.work_description ? (
+                <p className="whitespace-pre-wrap">{quote.work_description}</p>
+              ) : (
+                <span className="text-muted-foreground italic">Not set</span>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => setIsEditingWorkDescription(true)}>
+                <Pencil className="h-4 w-4" />
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>

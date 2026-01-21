@@ -302,6 +302,7 @@ class QuoteBase(BaseModel):
     project_id: int
     status: str = "Active"  # "Active" or "Invoiced"
     client_po_number: Optional[str] = None
+    work_description: Optional[str] = None
 
 
 class QuoteCreate(QuoteBase):
@@ -311,6 +312,7 @@ class QuoteCreate(QuoteBase):
 class QuoteUpdate(BaseModel):
     status: Optional[str] = None
     client_po_number: Optional[str] = None
+    work_description: Optional[str] = None
 
 
 class Quote(QuoteBase):
