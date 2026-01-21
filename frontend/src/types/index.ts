@@ -220,16 +220,19 @@ export interface Quote {
   created_at: string;
   status: QuoteStatus;
   current_version: number;
+  client_po_number?: string | null;
   line_items: QuoteLineItem[];
 }
 
 export interface QuoteCreate {
   project_id: number;
   status?: QuoteStatus;
+  client_po_number?: string;
 }
 
 export interface QuoteUpdate {
   status?: QuoteStatus;
+  client_po_number?: string | null;
 }
 
 // ===== PO Line Items =====

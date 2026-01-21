@@ -142,7 +142,8 @@ def create_quote(quote_data: QuoteCreate, db: Session = Depends(get_db)):
 
     db_quote = Quote(
         project_id=quote_data.project_id,
-        status=quote_data.status
+        status=quote_data.status,
+        client_po_number=quote_data.client_po_number
     )
     db.add(db_quote)
     db.commit()
@@ -161,6 +162,9 @@ def update_quote(quote_id: int, quote_data: QuoteUpdate, db: Session = Depends(g
         if quote_data.status not in ["Active", "Invoiced"]:
             raise HTTPException(status_code=400, detail="Status must be 'Active' or 'Invoiced'")
         db_quote.status = quote_data.status
+
+    if quote_data.client_po_number is not None:
+        db_quote.client_po_number = quote_data.client_po_number.strip() or None
 
     db.commit()
     db.refresh(db_quote)
@@ -474,6 +478,13 @@ def create_invoice(
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
+
+    # Validate client PO number is present before allowing invoice creation
+    if not quote.client_po_number or not quote.client_po_number.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot create invoice: Client PO Number is required. Please add a Client PO Number to this quote before creating an invoice."
+        )
 
     if not invoice_data.fulfillments:
         raise HTTPException(status_code=400, detail="At least one fulfillment is required")

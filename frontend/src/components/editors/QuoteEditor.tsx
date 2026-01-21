@@ -86,12 +86,18 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
   // Creating invoice
   const [isCreatingInvoice, setIsCreatingInvoice] = useState(false)
 
+  // Client PO Number editing
+  const [clientPoNumber, setClientPoNumber] = useState("")
+  const [isEditingClientPo, setIsEditingClientPo] = useState(false)
+  const [savingClientPo, setSavingClientPo] = useState(false)
+
   const fetchQuote = async () => {
     setLoading(true)
     setError(null)
     try {
       const data = await api.quotes.get(quoteId)
       setQuote(data)
+      setClientPoNumber(data.client_po_number || "")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch quote")
     } finally {
@@ -280,6 +286,20 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
       onUpdate?.()
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to update status")
+    }
+  }
+
+  const handleSaveClientPoNumber = async () => {
+    setSavingClientPo(true)
+    try {
+      await api.quotes.update(quoteId, { client_po_number: clientPoNumber.trim() || null })
+      setIsEditingClientPo(false)
+      fetchQuote()
+      onUpdate?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update Client PO Number")
+    } finally {
+      setSavingClientPo(false)
     }
   }
 
@@ -605,6 +625,61 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
         </div>
       </div>
 
+      {/* Client PO Number */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <ClipboardCheck className="h-4 w-4" />
+            Client PO Number
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isEditingClientPo ? (
+            <div className="flex items-center gap-2">
+              <Input
+                value={clientPoNumber}
+                onChange={(e) => setClientPoNumber(e.target.value)}
+                placeholder="Enter client PO number"
+                className="max-w-xs"
+              />
+              <Button
+                size="sm"
+                onClick={handleSaveClientPoNumber}
+                disabled={savingClientPo}
+              >
+                {savingClientPo ? "Saving..." : "Save"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setClientPoNumber(quote.client_po_number || "")
+                  setIsEditingClientPo(false)
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              {quote.client_po_number ? (
+                <span className="font-medium">{quote.client_po_number}</span>
+              ) : (
+                <span className="text-muted-foreground italic">Not set</span>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => setIsEditingClientPo(true)}>
+                <Pencil className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+          {!quote.client_po_number && (
+            <p className="text-sm text-amber-600 mt-2">
+              A Client PO Number is required before you can create an invoice.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Parts Section */}
       {renderLineItemSection("Parts", partItems, "part", <Package className="h-4 w-4" />, "Add Part")}
 
@@ -636,15 +711,22 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
 
       {/* Floating Invoice Button */}
       <div className="fixed bottom-6 right-6 z-50">
-        <Button
-          size="lg"
-          onClick={handleCreateInvoice}
-          disabled={stagedCount === 0 || isCreatingInvoice}
-          className="shadow-lg gap-2"
-        >
-          <Receipt className="h-5 w-5" />
-          {isCreatingInvoice ? "Creating..." : `Create Invoice${stagedCount > 0 ? ` (${stagedCount} items)` : ""}`}
-        </Button>
+        <div className="flex flex-col items-end gap-2">
+          {!quote.client_po_number && stagedCount > 0 && (
+            <span className="text-sm text-amber-600 bg-amber-50 px-3 py-1 rounded-md shadow-sm">
+              Client PO Number required
+            </span>
+          )}
+          <Button
+            size="lg"
+            onClick={handleCreateInvoice}
+            disabled={stagedCount === 0 || isCreatingInvoice || !quote.client_po_number}
+            className="shadow-lg gap-2"
+          >
+            <Receipt className="h-5 w-5" />
+            {isCreatingInvoice ? "Creating..." : `Create Invoice${stagedCount > 0 ? ` (${stagedCount} items)` : ""}`}
+          </Button>
+        </div>
       </div>
 
       {/* Add Line Item Dialog */}

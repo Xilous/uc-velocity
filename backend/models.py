@@ -157,6 +157,7 @@ class Quote(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     status = Column(String, default="Active")  # "Active" or "Invoiced"
     current_version = Column(Integer, default=0)  # Current snapshot version
+    client_po_number = Column(String, nullable=True)  # Client's PO number (required for invoicing)
 
     # Relationships
     project = relationship("Project", back_populates="quotes")
