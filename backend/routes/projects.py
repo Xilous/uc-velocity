@@ -4,7 +4,7 @@ from typing import List
 import re
 
 from database import get_db
-from models import Project, Profile, ProfileType, PurchaseOrder
+from models import Project, Profile, ProfileType, PurchaseOrder, Quote
 from schemas import ProjectCreate, ProjectUpdate, Project as ProjectSchema, ProjectFull
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -89,8 +89,9 @@ def get_project(project_id: int, db: Session = Depends(get_db)):
         db.query(Project)
         .options(
             joinedload(Project.customer),
-            joinedload(Project.quotes),
-            joinedload(Project.purchase_orders).joinedload(PurchaseOrder.vendor)
+            joinedload(Project.quotes).joinedload(Quote.line_items),
+            joinedload(Project.purchase_orders).joinedload(PurchaseOrder.vendor),
+            joinedload(Project.purchase_orders).joinedload(PurchaseOrder.line_items)
         )
         .filter(Project.id == project_id)
         .first()
