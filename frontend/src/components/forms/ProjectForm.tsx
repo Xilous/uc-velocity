@@ -9,8 +9,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SearchableSelect, SearchableSelectOption } from "@/components/ui/searchable-select"
 import { api } from "@/api/client"
-import type { Profile, Project, ProjectCreate } from "@/types"
+import type { Profile, Project, ProjectCreate, Contact } from "@/types"
+import { ProfileForm } from "./ProfileForm"
+import { ContactForm } from "./ContactForm"
 
 interface ProjectFormProps {
   project?: Project // If provided, we're editing; otherwise creating
@@ -114,24 +117,25 @@ export function ProjectForm({ project, onSuccess, onCancel }: ProjectFormProps) 
 
       <div className="space-y-2">
         <Label htmlFor="customer">Customer</Label>
-        {customers.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No customers found. Please create a customer first.
-          </p>
-        ) : (
-          <Select value={customerId} onValueChange={handleCustomerChange}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select a customer" />
-            </SelectTrigger>
-            <SelectContent>
-              {customers.map((customer) => (
-                <SelectItem key={customer.id} value={customer.id.toString()}>
-                  {customer.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
+        <SearchableSelect<Profile>
+          options={customers.map((customer): SearchableSelectOption => ({
+            value: customer.id.toString(),
+            label: customer.name,
+            description: customer.address,
+          }))}
+          value={customerId}
+          onChange={handleCustomerChange}
+          placeholder="Select a customer"
+          searchPlaceholder="Search customers..."
+          allowCreate={true}
+          createLabel="Create New Customer"
+          createDialogTitle="Create New Customer"
+          createForm={<ProfileForm defaultType="customer" />}
+          onCreateSuccess={(newCustomer) => {
+            setCustomers([...customers, newCustomer])
+            setCustomerId(newCustomer.id.toString())
+          }}
+        />
       </div>
 
       <div className="space-y-2">
@@ -140,28 +144,33 @@ export function ProjectForm({ project, onSuccess, onCancel }: ProjectFormProps) 
           <p className="text-sm text-muted-foreground">
             Select a customer first to choose a project lead.
           </p>
-        ) : availableContacts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No contacts found for this customer.
-          </p>
         ) : (
-          <Select value={projectLead} onValueChange={setProjectLead}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select a project lead (optional)" />
-            </SelectTrigger>
-            <SelectContent>
-              {availableContacts.map((contact) => (
-                <SelectItem key={contact.id} value={contact.name}>
-                  {contact.name}
-                  {contact.job_title && (
-                    <span className="text-muted-foreground ml-2">
-                      ({contact.job_title})
-                    </span>
-                  )}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SearchableSelect<Contact>
+            options={availableContacts.map((contact): SearchableSelectOption => ({
+              value: contact.name,
+              label: contact.name,
+              description: contact.job_title || undefined,
+            }))}
+            value={projectLead}
+            onChange={setProjectLead}
+            placeholder="Select a project lead (optional)"
+            searchPlaceholder="Search contacts..."
+            emptyMessage="No contacts found for this customer."
+            allowCreate={true}
+            createLabel="Create New Contact"
+            createDialogTitle="Create New Contact"
+            createForm={<ContactForm profileId={parseInt(customerId)} />}
+            onCreateSuccess={(newContact) => {
+              // Refresh the selected customer to get updated contacts
+              const updatedCustomers = customers.map(c =>
+                c.id.toString() === customerId
+                  ? { ...c, contacts: [...c.contacts, newContact] }
+                  : c
+              )
+              setCustomers(updatedCustomers)
+              setProjectLead(newContact.name)
+            }}
+          />
         )}
       </div>
 

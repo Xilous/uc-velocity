@@ -2,9 +2,10 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { MultiSelect, type Option } from "@/components/ui/multi-select"
+import { SearchableMultiSelect, SearchableMultiSelectOption } from "@/components/ui/searchable-multi-select"
 import { api } from "@/api/client"
 import type { Part, PartCreate, Labor } from "@/types"
+import { LaborForm } from "./LaborForm"
 
 interface PartFormProps {
   part?: Part // If provided, we're editing; otherwise creating
@@ -54,9 +55,10 @@ export function PartForm({ part, onSuccess, onCancel }: PartFormProps) {
   }, [part])
 
   // Convert labor items to multi-select options
-  const laborOptions: Option[] = laborItems.map((labor) => ({
+  const laborOptions: SearchableMultiSelectOption[] = laborItems.map((labor) => ({
     value: labor.id.toString(),
-    label: `${labor.description} (${labor.hours}hrs @ $${labor.rate.toFixed(2)}/hr)`,
+    label: labor.description,
+    description: `${labor.hours}hrs @ $${labor.rate.toFixed(2)}/hr`,
   }))
 
   // Calculate total linked labor cost
@@ -158,11 +160,21 @@ export function PartForm({ part, onSuccess, onCancel }: PartFormProps) {
 
       <div className="space-y-2">
         <Label>Linked Labour</Label>
-        <MultiSelect
+        <SearchableMultiSelect<Labor>
           options={laborOptions}
           selected={selectedLaborIds}
           onChange={setSelectedLaborIds}
           placeholder="Select labour tasks for this part..."
+          searchPlaceholder="Search labour items..."
+          emptyMessage="No labour items found."
+          allowCreate={true}
+          createLabel="Create New Labour"
+          createDialogTitle="Create New Labour Item"
+          createForm={<LaborForm />}
+          onCreateSuccess={(newLabor) => {
+            setLaborItems([...laborItems, newLabor])
+            setSelectedLaborIds([...selectedLaborIds, newLabor.id.toString()])
+          }}
         />
         <p className="text-sm text-muted-foreground">
           Select labour tasks that are typically performed with this part. When adding this part to a quote, the system will prompt to auto-add these labour items.

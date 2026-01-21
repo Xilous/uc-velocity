@@ -27,6 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { SearchableSelect, SearchableSelectOption } from "@/components/ui/searchable-select"
 import { api } from "@/api/client"
 import type {
   Quote, QuoteLineItem, QuoteLineItemCreate, QuoteLineItemUpdate,
@@ -35,6 +36,10 @@ import type {
 } from "@/types"
 import { Plus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt } from "lucide-react"
 import { QuoteAuditTrail } from "./QuoteAuditTrail"
+import { PartForm } from "@/components/forms/PartForm"
+import { LaborForm } from "@/components/forms/LaborForm"
+import { MiscForm } from "@/components/forms/MiscForm"
+import { DiscountCodeForm } from "@/components/forms/DiscountCodeForm"
 
 interface QuoteEditorProps {
   quoteId: number
@@ -746,77 +751,78 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
             {addDialogType === "labor" && (
               <div className="space-y-2">
                 <Label>Labour Item</Label>
-                {laborItems.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No labour items found. Create labour items in Inventory first.
-                  </p>
-                ) : (
-                  <Select value={selectedLaborId} onValueChange={setSelectedLaborId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select labour" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {laborItems.map((labor) => (
-                        <SelectItem key={labor.id} value={labor.id.toString()}>
-                          {labor.description} (${labor.rate}/hr x {labor.hours}hrs)
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
+                <SearchableSelect<Labor>
+                  options={laborItems.map((labor): SearchableSelectOption => ({
+                    value: labor.id.toString(),
+                    label: labor.description,
+                    description: `$${labor.rate}/hr x ${labor.hours}hrs`,
+                  }))}
+                  value={selectedLaborId}
+                  onChange={setSelectedLaborId}
+                  placeholder="Select labour"
+                  searchPlaceholder="Search labour items..."
+                  emptyMessage="No labour items found."
+                  allowCreate={true}
+                  createLabel="Create New Labour"
+                  createDialogTitle="Create New Labour Item"
+                  createForm={<LaborForm />}
+                  onCreateSuccess={(newLabor) => {
+                    setLaborItems([...laborItems, newLabor])
+                    setSelectedLaborId(newLabor.id.toString())
+                  }}
+                />
               </div>
             )}
 
             {addDialogType === "part" && (
               <div className="space-y-2">
                 <Label>Part</Label>
-                {parts.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No parts found. Create parts in Inventory first.
-                  </p>
-                ) : (
-                  <Select value={selectedPartId} onValueChange={setSelectedPartId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select part" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {parts.map((part) => (
-                        <SelectItem key={part.id} value={part.id.toString()}>
-                          {part.part_number} - {part.description} (${(part.cost * (1 + (part.markup_percent ?? 0) / 100)).toFixed(2)})
-                          {part.labor_items && part.labor_items.length > 0 && (
-                            <span className="ml-2 text-muted-foreground">
-                              ({part.labor_items.length} linked labour)
-                            </span>
-                          )}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
+                <SearchableSelect<Part>
+                  options={parts.map((part): SearchableSelectOption => ({
+                    value: part.id.toString(),
+                    label: `${part.part_number} - ${part.description}`,
+                    description: `$${(part.cost * (1 + (part.markup_percent ?? 0) / 100)).toFixed(2)}${part.labor_items && part.labor_items.length > 0 ? ` (${part.labor_items.length} linked labour)` : ''}`,
+                  }))}
+                  value={selectedPartId}
+                  onChange={setSelectedPartId}
+                  placeholder="Select part"
+                  searchPlaceholder="Search parts..."
+                  emptyMessage="No parts found."
+                  allowCreate={true}
+                  createLabel="Create New Part"
+                  createDialogTitle="Create New Part"
+                  createForm={<PartForm />}
+                  onCreateSuccess={(newPart) => {
+                    setParts([...parts, newPart])
+                    setSelectedPartId(newPart.id.toString())
+                  }}
+                />
               </div>
             )}
 
             {addDialogType === "misc" && (
               <div className="space-y-2">
                 <Label>Miscellaneous Item</Label>
-                {miscItems.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No miscellaneous items found. Create misc items in Inventory first.
-                  </p>
-                ) : (
-                  <Select value={selectedMiscId} onValueChange={setSelectedMiscId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select misc item" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {miscItems.map((misc) => (
-                        <SelectItem key={misc.id} value={misc.id.toString()}>
-                          {misc.description} (${(misc.rate * misc.hours * (1 + misc.markup_percent / 100)).toFixed(2)})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
+                <SearchableSelect<Miscellaneous>
+                  options={miscItems.map((misc): SearchableSelectOption => ({
+                    value: misc.id.toString(),
+                    label: misc.description,
+                    description: `$${(misc.rate * misc.hours * (1 + misc.markup_percent / 100)).toFixed(2)}`,
+                  }))}
+                  value={selectedMiscId}
+                  onChange={setSelectedMiscId}
+                  placeholder="Select misc item"
+                  searchPlaceholder="Search misc items..."
+                  emptyMessage="No miscellaneous items found."
+                  allowCreate={true}
+                  createLabel="Create New Misc Item"
+                  createDialogTitle="Create New Miscellaneous Item"
+                  createForm={<MiscForm />}
+                  onCreateSuccess={(newMisc) => {
+                    setMiscItems([...miscItems, newMisc])
+                    setSelectedMiscId(newMisc.id.toString())
+                  }}
+                />
               </div>
             )}
 
@@ -884,19 +890,28 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
 
               <div className="space-y-2">
                 <Label>Discount Code</Label>
-                <Select value={editDiscountCodeId} onValueChange={setEditDiscountCodeId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="No discount" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No discount</SelectItem>
-                    {discountCodes.map((code) => (
-                      <SelectItem key={code.id} value={code.id.toString()}>
-                        {code.code} (-{code.discount_percent.toFixed(2)}%)
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect<DiscountCode>
+                  options={[
+                    { value: "none", label: "No discount", description: undefined },
+                    ...discountCodes.map((code): SearchableSelectOption => ({
+                      value: code.id.toString(),
+                      label: code.code,
+                      description: `-${code.discount_percent.toFixed(2)}%`,
+                    }))
+                  ]}
+                  value={editDiscountCodeId}
+                  onChange={setEditDiscountCodeId}
+                  placeholder="No discount"
+                  searchPlaceholder="Search discount codes..."
+                  allowCreate={true}
+                  createLabel="Create New Discount Code"
+                  createDialogTitle="Create New Discount Code"
+                  createForm={<DiscountCodeForm />}
+                  onCreateSuccess={(newCode) => {
+                    setDiscountCodes([...discountCodes, newCode])
+                    setEditDiscountCodeId(newCode.id.toString())
+                  }}
+                />
               </div>
 
               <Button onClick={handleUpdateLineItem} className="w-full">

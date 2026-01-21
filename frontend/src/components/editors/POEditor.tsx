@@ -11,13 +11,6 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
   Table,
   TableBody,
   TableCell,
@@ -26,9 +19,11 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { SearchableSelect, SearchableSelectOption } from "@/components/ui/searchable-select"
 import { api } from "@/api/client"
 import type { PurchaseOrder, POLineItem, POLineItemCreate, POLineItemType, Part } from "@/types"
 import { Plus, Trash2, Package, FileText, Building } from "lucide-react"
+import { PartForm } from "@/components/forms/PartForm"
 
 interface POEditorProps {
   poId: number
@@ -314,24 +309,26 @@ export function POEditor({ poId, onUpdate }: POEditorProps) {
             {dialogType === "part" && (
               <div className="space-y-2">
                 <Label>Part</Label>
-                {parts.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No parts found. Create parts in Inventory first.
-                  </p>
-                ) : (
-                  <Select value={selectedPartId} onValueChange={setSelectedPartId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select part" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {parts.map((part) => (
-                        <SelectItem key={part.id} value={part.id.toString()}>
-                          {part.part_number} - {part.description} (${(part.cost * (1 + (part.markup_percent ?? 0) / 100)).toFixed(2)})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
+                <SearchableSelect<Part>
+                  options={parts.map((part): SearchableSelectOption => ({
+                    value: part.id.toString(),
+                    label: `${part.part_number} - ${part.description}`,
+                    description: `$${(part.cost * (1 + (part.markup_percent ?? 0) / 100)).toFixed(2)}`,
+                  }))}
+                  value={selectedPartId}
+                  onChange={setSelectedPartId}
+                  placeholder="Select part"
+                  searchPlaceholder="Search parts..."
+                  emptyMessage="No parts found."
+                  allowCreate={true}
+                  createLabel="Create New Part"
+                  createDialogTitle="Create New Part"
+                  createForm={<PartForm />}
+                  onCreateSuccess={(newPart) => {
+                    setParts([...parts, newPart])
+                    setSelectedPartId(newPart.id.toString())
+                  }}
+                />
               </div>
             )}
 

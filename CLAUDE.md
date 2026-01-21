@@ -241,3 +241,41 @@ App available at: http://localhost:5173
    - Labor-Parts linking must be atomic (all or nothing)
    - PurchaseOrders must NEVER include Labor line items
    - Quotes can include Labor, Parts, and Misc items
+
+---
+
+## UI Guidelines
+
+### Searchable Dropdowns
+
+Any field that references other objects (customers, parts, labor items, contacts, etc.) must be implemented as a **searchable dropdown** using the `SearchableSelect` or `SearchableMultiSelect` components:
+
+- The dropdown filters results as the user types
+- A "Create New [Type]" button always appears at the bottom of the dropdown list
+- Clicking "Create New" opens a Dialog with the full creation form for that object type
+- After creation, the new item is auto-selected
+
+**Components:**
+- `SearchableSelect` - Single selection with search and create (`frontend/src/components/ui/searchable-select.tsx`)
+- `SearchableMultiSelect` - Multi selection with search and create (`frontend/src/components/ui/searchable-multi-select.tsx`)
+
+**Exception:** Fields with fixed enum values (status, type, phone type) remain standard `Select` dropdowns without search or create functionality.
+
+**Example Usage:**
+```tsx
+<SearchableSelect<Customer>
+  options={customers.map(c => ({ value: c.id.toString(), label: c.name }))}
+  value={selectedId}
+  onChange={setSelectedId}
+  placeholder="Select a customer"
+  searchPlaceholder="Search customers..."
+  allowCreate={true}
+  createLabel="Create New Customer"
+  createDialogTitle="Create New Customer"
+  createForm={<ProfileForm defaultType="customer" />}
+  onCreateSuccess={(newCustomer) => {
+    setCustomers([...customers, newCustomer])
+    setSelectedId(newCustomer.id.toString())
+  }}
+/>
+```
