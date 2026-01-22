@@ -244,6 +244,33 @@ App available at: http://localhost:5173
 
 ---
 
+## Deployment Workflow
+
+**IMPORTANT:** After any changes or implementations to the codebase, always follow this deployment workflow:
+
+1. **Push to GitHub:**
+   - Commit all changes with a descriptive commit message
+   - Push to the remote repository on GitHub
+
+2. **Redeploy on Railway:**
+   - Use the Railway MCP server tools to redeploy the application
+   - Use `mcp__Railway__deploy` to trigger a new deployment
+
+3. **Database Migrations (Backend Changes):**
+   - If backend changes include modifications to SQLAlchemy models (`backend/models.py`), ensure the Railway PostgreSQL database schema is updated
+   - The production database on Railway uses PostgreSQL (not SQLite like local development)
+   - After model changes, verify the database tables are properly migrated/updated on Railway
+
+**Railway MCP Tools Available:**
+- `mcp__Railway__check-railway-status` - Verify CLI status and login
+- `mcp__Railway__deploy` - Deploy changes to Railway
+- `mcp__Railway__get-logs` - Check deployment/build logs
+- `mcp__Railway__list-services` - List services in the project
+- `mcp__Railway__list-variables` - View environment variables
+- `mcp__Railway__set-variables` - Set environment variables
+
+---
+
 ## UI Guidelines
 
 ### Searchable Dropdowns

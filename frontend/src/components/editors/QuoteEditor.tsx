@@ -35,7 +35,7 @@ import type {
   LineItemType, Part, Labor, Miscellaneous, DiscountCode, QuoteStatus,
   StagedFulfillment, InvoiceCreate
 } from "@/types"
-import { Plus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt } from "lucide-react"
+import { Plus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent } from "lucide-react"
 import { QuoteAuditTrail } from "./QuoteAuditTrail"
 import { PartForm } from "@/components/forms/PartForm"
 import { LaborForm } from "@/components/forms/LaborForm"
@@ -106,6 +106,11 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
   const [pmsDialogOpen, setPmsDialogOpen] = useState(false)
   const [pmsType, setPmsType] = useState<"percent" | "dollar">("dollar")
   const [pmsValue, setPmsValue] = useState("")
+
+  // Markup Discount Control states
+  const [markupControlDialogOpen, setMarkupControlDialogOpen] = useState(false)
+  const [pendingMarkupPercent, setPendingMarkupPercent] = useState("")
+  const [togglingMarkupControl, setTogglingMarkupControl] = useState(false)
 
   const fetchQuote = async () => {
     setLoading(true)
@@ -331,6 +336,66 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
       alert(err instanceof Error ? err.message : "Failed to update Work Description")
     } finally {
       setSavingWorkDescription(false)
+    }
+  }
+
+  // Markup Discount Control handlers
+  const handleToggleMarkupControl = () => {
+    if (!quote) return
+
+    if (!quote.markup_control_enabled) {
+      // Enabling - check for discount codes first
+      const hasDiscounts = quote.line_items.some(item => item.discount_code_id)
+      if (hasDiscounts) {
+        alert("Remove discount codes first to enable this feature")
+        return
+      }
+      // Open dialog to get global markup percent
+      setPendingMarkupPercent("")
+      setMarkupControlDialogOpen(true)
+    } else {
+      // Disabling - confirm and call API
+      if (!confirm("Disable Markup Discount Control? This will restore individual markups.")) {
+        return
+      }
+      handleDisableMarkupControl()
+    }
+  }
+
+  const handleDisableMarkupControl = async () => {
+    setTogglingMarkupControl(true)
+    try {
+      await api.quotes.toggleMarkupControl(quoteId, { enabled: false })
+      fetchQuote()
+      onUpdate?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to disable markup control")
+    } finally {
+      setTogglingMarkupControl(false)
+    }
+  }
+
+  const handleConfirmEnableMarkupControl = async () => {
+    const percent = parseFloat(pendingMarkupPercent)
+    if (isNaN(percent) || percent < 0) {
+      alert("Please enter a valid markup percentage (0 or greater)")
+      return
+    }
+
+    setTogglingMarkupControl(true)
+    try {
+      await api.quotes.toggleMarkupControl(quoteId, {
+        enabled: true,
+        global_markup_percent: percent
+      })
+      setMarkupControlDialogOpen(false)
+      setPendingMarkupPercent("")
+      fetchQuote()
+      onUpdate?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to enable markup control")
+    } finally {
+      setTogglingMarkupControl(false)
     }
   }
 
@@ -850,6 +915,40 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
         </CardContent>
       </Card>
 
+      {/* Markup Discount Control */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex justify-between items-center">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Percent className="h-4 w-4" />
+              Markup Discount Control
+            </CardTitle>
+            <div className="flex items-center gap-3">
+              {quote.markup_control_enabled && quote.global_markup_percent !== null && (
+                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-300">
+                  Global Markup: {quote.global_markup_percent}%
+                </Badge>
+              )}
+              <Button
+                size="sm"
+                variant={quote.markup_control_enabled ? "default" : "outline"}
+                onClick={handleToggleMarkupControl}
+                disabled={togglingMarkupControl}
+              >
+                {togglingMarkupControl ? "..." : (quote.markup_control_enabled ? "Enabled" : "Disabled")}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            {quote.markup_control_enabled
+              ? "Global markup is applied to all items. Discount codes are disabled."
+              : "Enable to apply a global markup percentage to all line items (excluding PMS items)."}
+          </p>
+        </CardContent>
+      </Card>
+
       {/* Parts Section */}
       {renderLineItemSection("Parts", partItems, "part", <Package className="h-4 w-4" />, "Add Part")}
 
@@ -1209,28 +1308,34 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
 
               <div className="space-y-2">
                 <Label>Discount Code</Label>
-                <SearchableSelect<DiscountCode>
-                  options={[
-                    { value: "none", label: "No discount", description: undefined },
-                    ...discountCodes.map((code): SearchableSelectOption => ({
-                      value: code.id.toString(),
-                      label: code.code,
-                      description: `-${code.discount_percent.toFixed(2)}%`,
-                    }))
-                  ]}
-                  value={editDiscountCodeId}
-                  onChange={setEditDiscountCodeId}
-                  placeholder="No discount"
-                  searchPlaceholder="Search discount codes..."
-                  allowCreate={true}
-                  createLabel="Create New Discount Code"
-                  createDialogTitle="Create New Discount Code"
-                  createForm={<DiscountCodeForm />}
-                  onCreateSuccess={(newCode) => {
-                    setDiscountCodes([...discountCodes, newCode])
-                    setEditDiscountCodeId(newCode.id.toString())
-                  }}
-                />
+                {quote?.markup_control_enabled ? (
+                  <div className="px-3 py-2 bg-muted/50 rounded-md text-muted-foreground text-sm">
+                    Discount codes disabled while Markup Control is enabled
+                  </div>
+                ) : (
+                  <SearchableSelect<DiscountCode>
+                    options={[
+                      { value: "none", label: "No discount", description: undefined },
+                      ...discountCodes.map((code): SearchableSelectOption => ({
+                        value: code.id.toString(),
+                        label: code.code,
+                        description: `-${code.discount_percent.toFixed(2)}%`,
+                      }))
+                    ]}
+                    value={editDiscountCodeId}
+                    onChange={setEditDiscountCodeId}
+                    placeholder="No discount"
+                    searchPlaceholder="Search discount codes..."
+                    allowCreate={true}
+                    createLabel="Create New Discount Code"
+                    createDialogTitle="Create New Discount Code"
+                    createForm={<DiscountCodeForm />}
+                    onCreateSuccess={(newCode) => {
+                      setDiscountCodes([...discountCodes, newCode])
+                      setEditDiscountCodeId(newCode.id.toString())
+                    }}
+                  />
+                )}
               </div>
 
               <Button onClick={handleUpdateLineItem} className="w-full">
@@ -1388,6 +1493,46 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
               <Plus className="h-4 w-4 mr-2" />
               Add Project Management Services
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Markup Control Enable Dialog */}
+      <Dialog open={markupControlDialogOpen} onOpenChange={setMarkupControlDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Percent className="h-4 w-4" />
+              Enable Markup Discount Control
+            </DialogTitle>
+            <DialogDescription>
+              Enter the global markup percentage to apply to all line items (excluding PMS items).
+              This will replace individual item markups.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label>Global Markup Percentage (%)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={pendingMarkupPercent}
+                onChange={(e) => setPendingMarkupPercent(e.target.value)}
+                placeholder="e.g., 15.00"
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setMarkupControlDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleConfirmEnableMarkupControl}
+                disabled={togglingMarkupControl || !pendingMarkupPercent}
+              >
+                {togglingMarkupControl ? "Applying..." : "Enable Markup Control"}
+              </Button>
+            </DialogFooter>
           </div>
         </DialogContent>
       </Dialog>

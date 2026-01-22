@@ -193,6 +193,8 @@ export interface QuoteLineItem {
   qty_fulfilled: number;  // Total fulfilled across all invoices
   is_pms: boolean;  // True for PMS items (Project Management Services)
   pms_percent?: number;  // Percentage value for PMS % items
+  original_markup_percent?: number;  // Individual markup before global override
+  base_cost?: number;  // Base cost used for recalculation
   labor?: Labor;
   part?: Part;
   miscellaneous?: Miscellaneous;
@@ -229,6 +231,8 @@ export interface Quote {
   current_version: number;
   client_po_number?: string | null;
   work_description?: string | null;
+  markup_control_enabled: boolean;  // Markup Discount Control toggle
+  global_markup_percent?: number | null;  // Global markup % when control is enabled
   line_items: QuoteLineItem[];
 }
 
@@ -348,6 +352,8 @@ export interface QuoteLineItemSnapshot {
   is_deleted: boolean;
   is_pms: boolean;  // True for PMS items (Project Management Services)
   pms_percent?: number;  // Percentage value for PMS % items
+  original_markup_percent?: number;  // Individual markup before global override
+  base_cost?: number;  // Base cost used for recalculation
 }
 
 // ===== Quote Snapshots =====
@@ -375,4 +381,16 @@ export interface RevertPreview {
 export interface StagedFulfillment {
   lineItemId: number;
   quantity: number;
+}
+
+// ===== Markup Control Toggle =====
+export interface MarkupControlToggleRequest {
+  enabled: boolean;
+  global_markup_percent?: number;
+}
+
+export interface MarkupControlToggleResponse {
+  success: boolean;
+  message: string;
+  quote: Quote;
 }

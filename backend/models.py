@@ -160,6 +160,8 @@ class Quote(Base):
     current_version = Column(Integer, default=0)  # Current snapshot version
     client_po_number = Column(String, nullable=True)  # Client's PO number (required for invoicing)
     work_description = Column(String, nullable=True)  # Optional work description
+    markup_control_enabled = Column(Boolean, default=False)  # Markup Discount Control toggle
+    global_markup_percent = Column(Float, nullable=True)  # Global markup % when control is enabled
 
     # Relationships
     project = relationship("Project", back_populates="quotes")
@@ -185,6 +187,8 @@ class QuoteLineItem(Base):
     qty_fulfilled = Column(Float, default=0.0)  # Total fulfilled across all invoices
     is_pms = Column(Boolean, default=False)  # True for PMS items (Project Management Services)
     pms_percent = Column(Float, nullable=True)  # Percentage value for PMS % items (null for PMS $ or non-PMS)
+    original_markup_percent = Column(Float, nullable=True)  # Individual markup before global override
+    base_cost = Column(Float, nullable=True)  # Base cost used for recalculation
 
     # Relationships
     quote = relationship("Quote", back_populates="line_items")
@@ -308,6 +312,8 @@ class QuoteLineItemSnapshot(Base):
     is_deleted = Column(Boolean, default=False)  # Track if item was deleted at this snapshot
     is_pms = Column(Boolean, default=False)  # True for PMS items (Project Management Services)
     pms_percent = Column(Float, nullable=True)  # Percentage value for PMS % items
+    original_markup_percent = Column(Float, nullable=True)  # Individual markup before global override
+    base_cost = Column(Float, nullable=True)  # Base cost used for recalculation
 
     # Relationships
     snapshot = relationship("QuoteSnapshot", back_populates="line_item_states")

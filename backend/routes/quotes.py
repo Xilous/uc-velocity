@@ -14,7 +14,7 @@ from schemas import (
     QuoteLineItemCreate, QuoteLineItemUpdate, QuoteLineItem as QuoteLineItemSchema,
     QuoteSnapshot as QuoteSnapshotSchema,
     Invoice as InvoiceSchema, InvoiceCreate, LineItemFulfillment,
-    RevertPreview
+    RevertPreview, MarkupControlToggleRequest, MarkupControlToggleResponse
 )
 
 
@@ -76,7 +76,9 @@ def create_snapshot(
             qty_fulfilled=item.qty_fulfilled,
             is_deleted=False,
             is_pms=item.is_pms,
-            pms_percent=item.pms_percent
+            pms_percent=item.pms_percent,
+            original_markup_percent=item.original_markup_percent,
+            base_cost=item.base_cost
         )
         db.add(item_snapshot)
 
@@ -103,6 +105,61 @@ def get_line_item_description(item: QuoteLineItem, db: Session) -> str:
             return f"Misc: {misc.description}" if misc else "Misc"
         return f"Misc: {item.description or 'Unknown'}"
     return "Unknown item"
+
+
+def calculate_base_cost(item: QuoteLineItem, db: Session) -> float:
+    """
+    Calculate the base cost (before markup) for a line item.
+
+    - Part: part.cost
+    - Labor: labor.rate * labor.hours
+    - Misc (linked): misc.rate * misc.hours
+    - Misc (not linked): current unit_price (treated as base)
+    - PMS items: returns 0 (they are exempt)
+    """
+    if item.is_pms:
+        return 0  # PMS items are exempt
+
+    if item.item_type == "part" and item.part_id:
+        part = db.query(Part).filter(Part.id == item.part_id).first()
+        return part.cost if part else 0
+
+    if item.item_type == "labor" and item.labor_id:
+        labor = db.query(Labor).filter(Labor.id == item.labor_id).first()
+        return labor.rate * labor.hours if labor else 0
+
+    if item.item_type == "misc":
+        if item.misc_id:
+            misc = db.query(Miscellaneous).filter(Miscellaneous.id == item.misc_id).first()
+            return misc.rate * misc.hours if misc else 0
+        else:
+            # Misc without linked inventory - treat unit_price as base cost
+            return item.unit_price or 0
+
+    return 0
+
+
+def get_original_markup(item: QuoteLineItem, db: Session) -> float:
+    """
+    Get the original/individual markup percent for a line item from its linked inventory.
+    """
+    if item.is_pms:
+        return 0  # PMS items don't have markup
+
+    if item.item_type == "part" and item.part_id:
+        part = db.query(Part).filter(Part.id == item.part_id).first()
+        return part.markup_percent if part else 0
+
+    if item.item_type == "labor" and item.labor_id:
+        labor = db.query(Labor).filter(Labor.id == item.labor_id).first()
+        return labor.markup_percent if labor else 0
+
+    if item.item_type == "misc" and item.misc_id:
+        misc = db.query(Miscellaneous).filter(Miscellaneous.id == item.misc_id).first()
+        return misc.markup_percent if misc else 0
+
+    # Misc without linked inventory - no original markup
+    return 0
 
 
 router = APIRouter(prefix="/quotes", tags=["quotes"])
@@ -195,6 +252,128 @@ def delete_quote(quote_id: int, db: Session = Depends(get_db)):
     return {"message": "Quote deleted successfully"}
 
 
+# ==================== Markup Discount Control ====================
+
+@router.post("/{quote_id}/markup-control", response_model=MarkupControlToggleResponse)
+def toggle_markup_control(
+    quote_id: int,
+    request: MarkupControlToggleRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Toggle the Markup Discount Control feature for a quote.
+
+    When enabling (request.enabled=True):
+    - Validates no discount codes are applied to any line items
+    - Requires global_markup_percent to be provided
+    - Stores original markups and base costs for each line item
+    - Recalculates all unit_prices using the global markup
+    - PMS items are EXEMPT and not recalculated
+
+    When disabling (request.enabled=False):
+    - Restores original markups to all line items
+    - Recalculates unit_prices from original individual markups
+    """
+    quote = (
+        db.query(Quote)
+        .options(joinedload(Quote.line_items))
+        .filter(Quote.id == quote_id)
+        .first()
+    )
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+
+    if request.enabled:
+        # Validate: No discount codes applied
+        lines_with_discounts = [
+            item for item in quote.line_items
+            if item.discount_code_id is not None
+        ]
+        if lines_with_discounts:
+            raise HTTPException(
+                status_code=400,
+                detail="Remove discount codes first to enable this feature"
+            )
+
+        if request.global_markup_percent is None:
+            raise HTTPException(
+                status_code=400,
+                detail="global_markup_percent is required when enabling markup control"
+            )
+
+        # Enable markup control
+        quote.markup_control_enabled = True
+        quote.global_markup_percent = request.global_markup_percent
+
+        # Recalculate all line items
+        for item in quote.line_items:
+            if item.is_pms:
+                continue  # Skip PMS items - they are EXEMPT
+
+            # Store original markup and base cost
+            item.original_markup_percent = get_original_markup(item, db)
+            item.base_cost = calculate_base_cost(item, db)
+
+            # Recalculate unit_price with global markup
+            if item.base_cost:
+                item.unit_price = item.base_cost * (1 + request.global_markup_percent / 100)
+
+        # Create snapshot
+        create_snapshot(
+            db=db,
+            quote=quote,
+            action_type="edit",
+            action_description=f"Enabled Markup Discount Control ({request.global_markup_percent}%)"
+        )
+
+        message = f"Markup Discount Control enabled with {request.global_markup_percent}% markup"
+
+    else:
+        # Disable markup control
+        quote.markup_control_enabled = False
+        quote.global_markup_percent = None
+
+        # Restore original markups
+        for item in quote.line_items:
+            if item.is_pms:
+                continue  # Skip PMS items
+
+            # Restore unit_price using original markup
+            if item.base_cost is not None and item.original_markup_percent is not None:
+                item.unit_price = item.base_cost * (1 + item.original_markup_percent / 100)
+
+        # Create snapshot
+        create_snapshot(
+            db=db,
+            quote=quote,
+            action_type="edit",
+            action_description="Disabled Markup Discount Control (restored individual markups)"
+        )
+
+        message = "Markup Discount Control disabled, original markups restored"
+
+    db.commit()
+
+    # Reload quote with all relationships
+    quote = (
+        db.query(Quote)
+        .options(
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.labor),
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.part),
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous),
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code)
+        )
+        .filter(Quote.id == quote_id)
+        .first()
+    )
+
+    return MarkupControlToggleResponse(
+        success=True,
+        message=message,
+        quote=quote
+    )
+
+
 # ==================== Line Items ====================
 
 @router.get("/{quote_id}/lines", response_model=List[QuoteLineItemSchema])
@@ -268,6 +447,12 @@ def add_quote_line(quote_id: int, line_data: QuoteLineItemCreate, db: Session = 
 
     # Validate discount code if provided
     if line_data.discount_code_id:
+        # Block discount codes when markup control is enabled
+        if quote.markup_control_enabled:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot apply discount codes while Markup Discount Control is enabled"
+            )
         discount_code = db.query(DiscountCode).filter(
             DiscountCode.id == line_data.discount_code_id,
             DiscountCode.is_archived == False
@@ -291,7 +476,14 @@ def add_quote_line(quote_id: int, line_data: QuoteLineItemCreate, db: Session = 
         pms_percent=line_data.pms_percent
     )
     db.add(db_line)
-    db.flush()  # Get the ID without committing
+    db.flush()  # Need ID for calculate_base_cost
+
+    # If markup control is enabled, apply global markup to new items
+    if quote.markup_control_enabled and not line_data.is_pms:
+        db_line.original_markup_percent = get_original_markup(db_line, db)
+        db_line.base_cost = calculate_base_cost(db_line, db)
+        if db_line.base_cost and quote.global_markup_percent is not None:
+            db_line.unit_price = db_line.base_cost * (1 + quote.global_markup_percent / 100)
 
     # Create snapshot after adding line item
     item_desc = get_line_item_description(db_line, db)
@@ -369,6 +561,12 @@ def update_quote_line(
                 changes.append("removed discount code")
             db_line.discount_code_id = None
         else:
+            # Block discount codes when markup control is enabled
+            if quote.markup_control_enabled:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot apply discount codes while Markup Discount Control is enabled"
+                )
             # Validate discount code exists and is not archived
             discount_code = db.query(DiscountCode).filter(
                 DiscountCode.id == line_data.discount_code_id,
@@ -463,7 +661,9 @@ def delete_quote_line(quote_id: int, line_id: int, db: Session = Depends(get_db)
             qty_fulfilled=item.qty_fulfilled,
             is_deleted=(item.id == line_id),  # Mark the deleted item
             is_pms=item.is_pms,
-            pms_percent=item.pms_percent
+            pms_percent=item.pms_percent,
+            original_markup_percent=item.original_markup_percent,
+            base_cost=item.base_cost
         )
         db.add(item_snapshot)
 
@@ -750,7 +950,9 @@ def revert_to_snapshot(quote_id: int, version: int, db: Session = Depends(get_db
                 qty_pending=item_state.qty_pending,
                 qty_fulfilled=item_state.qty_fulfilled,
                 is_pms=item_state.is_pms,
-                pms_percent=item_state.pms_percent
+                pms_percent=item_state.pms_percent,
+                original_markup_percent=item_state.original_markup_percent,
+                base_cost=item_state.base_cost
             )
             db.add(restored_item)
             restored_count += 1
@@ -790,7 +992,9 @@ def revert_to_snapshot(quote_id: int, version: int, db: Session = Depends(get_db
             qty_fulfilled=item.qty_fulfilled,
             is_deleted=False,
             is_pms=item.is_pms,
-            pms_percent=item.pms_percent
+            pms_percent=item.pms_percent,
+            original_markup_percent=item.original_markup_percent,
+            base_cost=item.base_cost
         )
         db.add(item_snapshot)
 

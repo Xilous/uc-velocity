@@ -8,7 +8,8 @@ import type {
   Project, ProjectCreate, ProjectFull,
   Quote, QuoteCreate, QuoteUpdate, QuoteLineItem, QuoteLineItemCreate, QuoteLineItemUpdate,
   PurchaseOrder, PurchaseOrderCreate, POLineItem, POLineItemCreate,
-  Invoice, InvoiceCreate, InvoiceStatusUpdate, QuoteSnapshot, RevertPreview
+  Invoice, InvoiceCreate, InvoiceStatusUpdate, QuoteSnapshot, RevertPreview,
+  MarkupControlToggleRequest, MarkupControlToggleResponse
 } from '@/types';
 
 // API base URL - configurable via environment variable for production
@@ -157,6 +158,10 @@ export const api = {
       request<RevertPreview>(`/quotes/${quoteId}/revert/${version}/preview`),
     revert: (quoteId: number, version: number) =>
       request<Quote>(`/quotes/${quoteId}/revert/${version}`, { method: 'POST' }),
+
+    // Markup Control
+    toggleMarkupControl: (quoteId: number, data: MarkupControlToggleRequest) =>
+      request<MarkupControlToggleResponse>(`/quotes/${quoteId}/markup-control`, { method: 'POST', body: JSON.stringify(data) }),
   },
 
   // ===== Invoices =====

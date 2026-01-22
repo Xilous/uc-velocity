@@ -273,6 +273,8 @@ class QuoteLineItemBase(BaseModel):
     unit_price: Optional[float] = None
     is_pms: bool = False  # True for PMS items (Project Management Services)
     pms_percent: Optional[float] = None  # Percentage value for PMS % items
+    original_markup_percent: Optional[float] = None  # Individual markup before global override
+    base_cost: Optional[float] = None  # Base cost used for recalculation
 
 
 class QuoteLineItemCreate(QuoteLineItemBase):
@@ -305,6 +307,8 @@ class QuoteBase(BaseModel):
     status: str = "Active"  # "Active" or "Invoiced"
     client_po_number: Optional[str] = None
     work_description: Optional[str] = None
+    markup_control_enabled: bool = False  # Markup Discount Control toggle
+    global_markup_percent: Optional[float] = None  # Global markup % when control is enabled
 
 
 class QuoteCreate(QuoteBase):
@@ -450,6 +454,8 @@ class QuoteLineItemSnapshotBase(BaseModel):
     is_deleted: bool = False
     is_pms: bool = False  # True for PMS items (Project Management Services)
     pms_percent: Optional[float] = None  # Percentage value for PMS % items
+    original_markup_percent: Optional[float] = None  # Individual markup before global override
+    base_cost: Optional[float] = None  # Base cost used for recalculation
 
 
 class QuoteLineItemSnapshot(QuoteLineItemSnapshotBase):
@@ -483,3 +489,15 @@ class RevertPreview(BaseModel):
     target_version: int
     invoices_to_void: List[Invoice] = []
     changes_summary: str
+
+
+# ===== Markup Control Toggle Schemas =====
+class MarkupControlToggleRequest(BaseModel):
+    enabled: bool
+    global_markup_percent: Optional[float] = None  # Required when enabled=True
+
+
+class MarkupControlToggleResponse(BaseModel):
+    success: bool
+    message: str
+    quote: Quote
