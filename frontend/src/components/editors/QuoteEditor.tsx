@@ -23,6 +23,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -630,6 +631,16 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       }, 0)
   }
 
+  // Calculate section totals for display
+  const calculateSectionTotals = (items: QuoteLineItem[], useEffectiveTotal = false) => {
+    return {
+      qtyOrdered: items.reduce((sum, item) => sum + item.quantity, 0),
+      qtyPending: items.reduce((sum, item) => sum + item.qty_pending, 0),
+      qtyFulfilled: items.reduce((sum, item) => sum + item.qty_fulfilled, 0),
+      total: items.reduce((sum, item) => sum + (useEffectiveTotal ? getEffectiveLineItemTotal(item) : getLineItemTotal(item)), 0),
+    }
+  }
+
   // Round up to nearest 8
   const roundUpToNearest8 = (value: number): number => {
     return Math.ceil(value / 8) * 8
@@ -1097,6 +1108,20 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                 )
               })}
             </TableBody>
+            {items.length > 0 && (
+              <TableFooter>
+                <TableRow className="bg-muted/50">
+                  <TableCell className="font-semibold">Section Total</TableCell>
+                  <TableCell className="text-right font-semibold">{calculateSectionTotals(items).qtyOrdered}</TableCell>
+                  <TableCell className="text-right font-semibold">{calculateSectionTotals(items).qtyPending}</TableCell>
+                  <TableCell className="text-right font-semibold">{calculateSectionTotals(items).qtyFulfilled}</TableCell>
+                  <TableCell></TableCell>
+                  <TableCell></TableCell>
+                  <TableCell className="text-right font-bold">${calculateSectionTotals(items).total.toFixed(2)}</TableCell>
+                  <TableCell></TableCell>
+                </TableRow>
+              </TableFooter>
+            )}
           </Table>
         )}
       </CardContent>
@@ -1450,6 +1475,20 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                   )
                 })}
               </TableBody>
+              {laborItems2.length > 0 && (
+                <TableFooter>
+                  <TableRow className="bg-muted/50">
+                    <TableCell className="font-semibold">Section Total</TableCell>
+                    <TableCell className="text-right font-semibold">{calculateSectionTotals(laborItems2, true).qtyOrdered}</TableCell>
+                    <TableCell className="text-right font-semibold">{calculateSectionTotals(laborItems2, true).qtyPending}</TableCell>
+                    <TableCell className="text-right font-semibold">{calculateSectionTotals(laborItems2, true).qtyFulfilled}</TableCell>
+                    <TableCell></TableCell>
+                    <TableCell></TableCell>
+                    <TableCell className="text-right font-bold">${calculateSectionTotals(laborItems2, true).total.toFixed(2)}</TableCell>
+                    <TableCell></TableCell>
+                  </TableRow>
+                </TableFooter>
+              )}
             </Table>
           )}
         </CardContent>
