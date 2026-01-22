@@ -9,6 +9,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Input } from "@/components/ui/input"
 import { PartForm } from "@/components/forms/PartForm"
 import { LaborForm } from "@/components/forms/LaborForm"
 import { MiscForm } from "@/components/forms/MiscForm"
@@ -31,6 +32,7 @@ import {
   Tag,
   FileText,
   Lock,
+  Search,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
@@ -46,6 +48,7 @@ function App() {
   const [miscItems, setMiscItems] = useState<Miscellaneous[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [inventorySearchTerm, setInventorySearchTerm] = useState("")
 
   // Dialog state
   const [partDialogOpen, setPartDialogOpen] = useState(false)
@@ -197,7 +200,33 @@ function App() {
           />
         )
 
-      case "inventory":
+      case "inventory": {
+        // Filter functions for search
+        const filteredParts = parts.filter((part) => {
+          const term = inventorySearchTerm.toLowerCase()
+          if (!term) return true
+          return (
+            part.part_number.toLowerCase().includes(term) ||
+            part.description.toLowerCase().includes(term) ||
+            (part.category?.toLowerCase().includes(term) ?? false)
+          )
+        })
+
+        const filteredLaborItems = laborItems.filter((labor) => {
+          const term = inventorySearchTerm.toLowerCase()
+          if (!term) return true
+          return (
+            labor.description.toLowerCase().includes(term) ||
+            (labor.category?.toLowerCase().includes(term) ?? false)
+          )
+        })
+
+        const filteredMiscItems = miscItems.filter((misc) => {
+          const term = inventorySearchTerm.toLowerCase()
+          if (!term) return true
+          return misc.description.toLowerCase().includes(term)
+        })
+
         return (
           <div className="space-y-6">
             <div>
@@ -229,6 +258,17 @@ function App() {
                 </TabsList>
               </div>
 
+              {/* Search Bar */}
+              <div className="relative max-w-sm mb-4">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search inventory..."
+                  value={inventorySearchTerm}
+                  onChange={(e) => setInventorySearchTerm(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+
               {/* Parts Tab */}
               <TabsContent value="parts">
                 <div className="bg-card rounded-lg border shadow-sm">
@@ -242,9 +282,11 @@ function App() {
 
                   {loading ? (
                     <div className="p-8 text-center text-muted-foreground">Loading...</div>
-                  ) : parts.length === 0 ? (
+                  ) : filteredParts.length === 0 ? (
                     <div className="p-8 text-center text-muted-foreground">
-                      No parts found. Add your first part to get started.
+                      {inventorySearchTerm
+                        ? "No parts matching your search."
+                        : "No parts found. Add your first part to get started."}
                     </div>
                   ) : (
                     <table className="w-full">
@@ -271,7 +313,7 @@ function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y">
-                        {parts.map((part) => (
+                        {filteredParts.map((part) => (
                           <tr key={part.id} className="hover:bg-muted/50">
                             <td className="px-4 py-3 text-sm font-medium">
                               {part.part_number}
@@ -326,9 +368,11 @@ function App() {
 
                   {loading ? (
                     <div className="p-8 text-center text-muted-foreground">Loading...</div>
-                  ) : laborItems.length === 0 ? (
+                  ) : filteredLaborItems.length === 0 ? (
                     <div className="p-8 text-center text-muted-foreground">
-                      No labour items found. Add your first labour item to get started.
+                      {inventorySearchTerm
+                        ? "No labour items matching your search."
+                        : "No labour items found. Add your first labour item to get started."}
                     </div>
                   ) : (
                     <table className="w-full">
@@ -355,7 +399,7 @@ function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y">
-                        {laborItems.map((labor) => (
+                        {filteredLaborItems.map((labor) => (
                           <tr key={labor.id} className="hover:bg-muted/50">
                             <td className="px-4 py-3 text-sm font-medium">
                               {labor.description}
@@ -410,9 +454,11 @@ function App() {
 
                   {loading ? (
                     <div className="p-8 text-center text-muted-foreground">Loading...</div>
-                  ) : miscItems.length === 0 ? (
+                  ) : filteredMiscItems.length === 0 ? (
                     <div className="p-8 text-center text-muted-foreground">
-                      No miscellaneous items found. Add your first miscellaneous item to get started.
+                      {inventorySearchTerm
+                        ? "No miscellaneous items matching your search."
+                        : "No miscellaneous items found. Add your first miscellaneous item to get started."}
                     </div>
                   ) : (
                     <table className="w-full">
@@ -436,7 +482,7 @@ function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y">
-                        {miscItems.map((misc) => (
+                        {filteredMiscItems.map((misc) => (
                           <tr key={misc.id} className="hover:bg-muted/50">
                             <td className="px-4 py-3 text-sm font-medium">
                               <div className="flex items-center gap-2">
@@ -489,6 +535,7 @@ function App() {
             </Tabs>
           </div>
         )
+      }
 
       default:
         return null
