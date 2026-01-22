@@ -14,9 +14,24 @@ from database import engine, Base, SessionLocal
 from routes import parts, labor, profiles, projects, quotes, purchase_orders, discount_codes, miscellaneous, invoices
 from seed import seed_system_items
 
-# Note: Database schema migrations are handled by Alembic.
-# - Production (Railway): Runs automatically via releaseCommand in railway.toml
-# - Local development: Run `alembic upgrade head` before starting the server
+# Run Alembic migrations on startup
+def run_alembic_migrations():
+    """Run Alembic migrations to ensure database schema is up to date."""
+    from alembic.config import Config
+    from alembic import command
+    import sys
+
+    try:
+        # Get the directory where main.py is located
+        alembic_cfg = Config(str(Path(__file__).parent / "alembic.ini"))
+        command.upgrade(alembic_cfg, "head")
+        print("Alembic migrations: database is up to date")
+    except Exception as e:
+        print(f"Alembic migrations error: {e}", file=sys.stderr)
+        # Don't fail startup - Base.metadata.create_all() will handle table creation
+        pass
+
+run_alembic_migrations()
 
 # Create all database tables (idempotent - safe fallback for fresh installs)
 Base.metadata.create_all(bind=engine)
