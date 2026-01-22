@@ -119,6 +119,12 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
   const [pendingMarkupPercent, setPendingMarkupPercent] = useState("")
   const [togglingMarkupControl, setTogglingMarkupControl] = useState(false)
 
+  // Discount All dialog state
+  const [discountAllDialogOpen, setDiscountAllDialogOpen] = useState(false)
+  const [discountAllSection, setDiscountAllSection] = useState<LineItemType | null>(null)
+  const [selectedBulkDiscountCodeId, setSelectedBulkDiscountCodeId] = useState<string>("")
+  const [applyingDiscount, setApplyingDiscount] = useState(false)
+
   const fetchQuote = async () => {
     setLoading(true)
     setError(null)
@@ -697,6 +703,59 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
     }
   }
 
+  // Fulfill All handler - stages all items in section for fulfillment
+  const handleFulfillAll = (itemType: LineItemType) => {
+    if (!quote) return
+
+    const itemsToFulfill = quote.line_items.filter(
+      item => item.item_type === itemType && item.qty_pending > 0
+    )
+
+    if (itemsToFulfill.length === 0) return
+
+    const newStagedFulfillments = new Map(stagedFulfillments)
+    itemsToFulfill.forEach(item => {
+      newStagedFulfillments.set(item.id, item.qty_pending)
+    })
+
+    setStagedFulfillments(newStagedFulfillments)
+  }
+
+  // Discount All handlers
+  const handleOpenDiscountAll = (itemType: LineItemType) => {
+    setDiscountAllSection(itemType)
+    setSelectedBulkDiscountCodeId("")
+    setDiscountAllDialogOpen(true)
+  }
+
+  const handleApplyDiscountAll = async () => {
+    if (!quote || !discountAllSection || !selectedBulkDiscountCodeId) return
+
+    setApplyingDiscount(true)
+
+    const itemsToUpdate = quote.line_items.filter(
+      item => item.item_type === discountAllSection
+    )
+
+    try {
+      for (const item of itemsToUpdate) {
+        await api.quotes.updateLine(quote.id, item.id, {
+          discount_code_id: selectedBulkDiscountCodeId === "none"
+            ? 0  // 0 to remove discount
+            : parseInt(selectedBulkDiscountCodeId)
+        })
+      }
+
+      await fetchQuote()
+      setDiscountAllDialogOpen(false)
+      onUpdate?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to apply discounts")
+    } finally {
+      setApplyingDiscount(false)
+    }
+  }
+
   if (loading) {
     return <div className="p-8 text-center text-muted-foreground">Loading...</div>
   }
@@ -726,15 +785,35 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
             {icon}
             {title}
           </CardTitle>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => openAddDialog(type)}
-            className="gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            {addButtonLabel}
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleFulfillAll(type)}
+              disabled={!items.some(item => item.qty_pending > 0)}
+            >
+              <ClipboardCheck className="h-4 w-4 mr-1" />
+              Fulfill All
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleOpenDiscountAll(type)}
+              disabled={quote?.markup_control_enabled || items.length === 0}
+            >
+              <Tag className="h-4 w-4 mr-1" />
+              Discount All
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => openAddDialog(type)}
+              className="gap-2"
+            >
+              <Plus className="h-4 w-4" />
+              {addButtonLabel}
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -1027,6 +1106,24 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
               Labour
             </CardTitle>
             <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleFulfillAll("labor")}
+                disabled={!laborItems2.some(item => item.qty_pending > 0)}
+              >
+                <ClipboardCheck className="h-4 w-4 mr-1" />
+                Fulfill All
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleOpenDiscountAll("labor")}
+                disabled={quote?.markup_control_enabled || laborItems2.length === 0}
+              >
+                <Tag className="h-4 w-4 mr-1" />
+                Discount All
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -1651,6 +1748,61 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
               </Button>
             </DialogFooter>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Discount All Dialog */}
+      <Dialog open={discountAllDialogOpen} onOpenChange={setDiscountAllDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Tag className="h-4 w-4" />
+              Apply Discount to All {discountAllSection === "labor" ? "Labour" : discountAllSection === "part" ? "Parts" : "Miscellaneous"} Items
+            </DialogTitle>
+            <DialogDescription>
+              Select a discount code to apply to all items in this section.
+              This will replace any existing discounts.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label>Discount Code</Label>
+              <Select
+                value={selectedBulkDiscountCodeId}
+                onValueChange={setSelectedBulkDiscountCodeId}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select discount code" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No Discount (Remove All)</SelectItem>
+                  {discountCodes
+                    .filter(dc => !dc.is_archived)
+                    .map(dc => (
+                      <SelectItem key={dc.id} value={dc.id.toString()}>
+                        {dc.code} (-{dc.discount_percent}%)
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {discountAllSection && (
+              <p className="text-sm text-muted-foreground">
+                This will update {quote?.line_items.filter(i => i.item_type === discountAllSection).length || 0} item(s)
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDiscountAllDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleApplyDiscountAll}
+              disabled={!selectedBulkDiscountCodeId || applyingDiscount}
+            >
+              {applyingDiscount ? "Applying..." : "Apply to All"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
