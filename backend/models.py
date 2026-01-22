@@ -183,6 +183,8 @@ class QuoteLineItem(Base):
     unit_price = Column(Float)  # Override price if needed
     qty_pending = Column(Float, default=0.0)  # Remaining to fulfill
     qty_fulfilled = Column(Float, default=0.0)  # Total fulfilled across all invoices
+    is_pms = Column(Boolean, default=False)  # True for PMS items (Project Management Services)
+    pms_percent = Column(Float, nullable=True)  # Percentage value for PMS % items (null for PMS $ or non-PMS)
 
     # Relationships
     quote = relationship("Quote", back_populates="line_items")
@@ -304,6 +306,8 @@ class QuoteLineItemSnapshot(Base):
     qty_pending = Column(Float)
     qty_fulfilled = Column(Float)
     is_deleted = Column(Boolean, default=False)  # Track if item was deleted at this snapshot
+    is_pms = Column(Boolean, default=False)  # True for PMS items (Project Management Services)
+    pms_percent = Column(Float, nullable=True)  # Percentage value for PMS % items
 
     # Relationships
     snapshot = relationship("QuoteSnapshot", back_populates="line_item_states")

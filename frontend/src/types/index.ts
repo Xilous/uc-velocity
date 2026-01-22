@@ -191,6 +191,8 @@ export interface QuoteLineItem {
   unit_price?: number;
   qty_pending: number;  // Remaining to fulfill
   qty_fulfilled: number;  // Total fulfilled across all invoices
+  is_pms: boolean;  // True for PMS items (Project Management Services)
+  pms_percent?: number;  // Percentage value for PMS % items
   labor?: Labor;
   part?: Part;
   miscellaneous?: Miscellaneous;
@@ -206,6 +208,8 @@ export interface QuoteLineItemCreate {
   description?: string;
   quantity: number;
   unit_price?: number;
+  is_pms?: boolean;  // True for PMS items (Project Management Services)
+  pms_percent?: number;  // Percentage value for PMS % items
 }
 
 export interface QuoteLineItemUpdate {
@@ -342,6 +346,8 @@ export interface QuoteLineItemSnapshot {
   qty_pending: number;
   qty_fulfilled: number;
   is_deleted: boolean;
+  is_pms: boolean;  // True for PMS items (Project Management Services)
+  pms_percent?: number;  // Percentage value for PMS % items
 }
 
 // ===== Quote Snapshots =====

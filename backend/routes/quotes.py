@@ -74,7 +74,9 @@ def create_snapshot(
             unit_price=item.unit_price,
             qty_pending=item.qty_pending,
             qty_fulfilled=item.qty_fulfilled,
-            is_deleted=False
+            is_deleted=False,
+            is_pms=item.is_pms,
+            pms_percent=item.pms_percent
         )
         db.add(item_snapshot)
 
@@ -83,9 +85,15 @@ def create_snapshot(
 
 def get_line_item_description(item: QuoteLineItem, db: Session) -> str:
     """Get a human-readable description for a line item."""
-    if item.item_type == "labor" and item.labor_id:
-        labor = db.query(Labor).filter(Labor.id == item.labor_id).first()
-        return f"Labor: {labor.description}" if labor else "Labor"
+    if item.item_type == "labor":
+        if item.labor_id:
+            labor = db.query(Labor).filter(Labor.id == item.labor_id).first()
+            return f"Labor: {labor.description}" if labor else "Labor"
+        elif item.is_pms:
+            # PMS item (custom labor without inventory reference)
+            pms_suffix = f" ({item.pms_percent}%)" if item.pms_percent else ""
+            return f"Labor: {item.description or 'PMS'}{pms_suffix}"
+        return f"Labor: {item.description or 'Unknown'}"
     elif item.item_type == "part" and item.part_id:
         part = db.query(Part).filter(Part.id == item.part_id).first()
         return f"Part: {part.part_number}" if part else "Part"
@@ -225,10 +233,22 @@ def add_quote_line(quote_id: int, line_data: QuoteLineItemCreate, db: Session = 
     # Validate references based on item_type
     if line_data.item_type == "labor":
         if not line_data.labor_id:
-            raise HTTPException(status_code=400, detail="labor_id required for labor line items")
-        labor = db.query(Labor).filter(Labor.id == line_data.labor_id).first()
-        if not labor:
-            raise HTTPException(status_code=400, detail="Labor not found")
+            # Allow PMS items (custom labor items) if is_pms=True and description provided
+            if not line_data.is_pms or not line_data.description:
+                raise HTTPException(
+                    status_code=400,
+                    detail="labor_id required for labor line items, or set is_pms=True with a description"
+                )
+            # For PMS items, require either unit_price (for PMS $) or pms_percent (for PMS %)
+            if line_data.unit_price is None and line_data.pms_percent is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="PMS items require either unit_price (for PMS $) or pms_percent (for PMS %)"
+                )
+        else:
+            labor = db.query(Labor).filter(Labor.id == line_data.labor_id).first()
+            if not labor:
+                raise HTTPException(status_code=400, detail="Labor not found")
 
     elif line_data.item_type == "part":
         if not line_data.part_id:
@@ -266,7 +286,9 @@ def add_quote_line(quote_id: int, line_data: QuoteLineItemCreate, db: Session = 
         quantity=line_data.quantity,
         unit_price=line_data.unit_price,
         qty_pending=line_data.quantity,  # Initialize qty_pending = quantity
-        qty_fulfilled=0.0
+        qty_fulfilled=0.0,
+        is_pms=line_data.is_pms,
+        pms_percent=line_data.pms_percent
     )
     db.add(db_line)
     db.flush()  # Get the ID without committing
@@ -439,7 +461,9 @@ def delete_quote_line(quote_id: int, line_id: int, db: Session = Depends(get_db)
             unit_price=item.unit_price,
             qty_pending=item.qty_pending,
             qty_fulfilled=item.qty_fulfilled,
-            is_deleted=(item.id == line_id)  # Mark the deleted item
+            is_deleted=(item.id == line_id),  # Mark the deleted item
+            is_pms=item.is_pms,
+            pms_percent=item.pms_percent
         )
         db.add(item_snapshot)
 
@@ -724,7 +748,9 @@ def revert_to_snapshot(quote_id: int, version: int, db: Session = Depends(get_db
                 quantity=item_state.quantity,
                 unit_price=item_state.unit_price,
                 qty_pending=item_state.qty_pending,
-                qty_fulfilled=item_state.qty_fulfilled
+                qty_fulfilled=item_state.qty_fulfilled,
+                is_pms=item_state.is_pms,
+                pms_percent=item_state.pms_percent
             )
             db.add(restored_item)
             restored_count += 1
@@ -762,7 +788,9 @@ def revert_to_snapshot(quote_id: int, version: int, db: Session = Depends(get_db
             unit_price=item.unit_price,
             qty_pending=item.qty_pending,
             qty_fulfilled=item.qty_fulfilled,
-            is_deleted=False
+            is_deleted=False,
+            is_pms=item.is_pms,
+            pms_percent=item.pms_percent
         )
         db.add(item_snapshot)
 

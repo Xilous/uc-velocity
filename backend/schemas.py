@@ -271,6 +271,8 @@ class QuoteLineItemBase(BaseModel):
     description: Optional[str] = None
     quantity: float = 1.0
     unit_price: Optional[float] = None
+    is_pms: bool = False  # True for PMS items (Project Management Services)
+    pms_percent: Optional[float] = None  # Percentage value for PMS % items
 
 
 class QuoteLineItemCreate(QuoteLineItemBase):
@@ -446,6 +448,8 @@ class QuoteLineItemSnapshotBase(BaseModel):
     qty_pending: float
     qty_fulfilled: float
     is_deleted: bool = False
+    is_pms: bool = False  # True for PMS items (Project Management Services)
+    pms_percent: Optional[float] = None  # Percentage value for PMS % items
 
 
 class QuoteLineItemSnapshot(QuoteLineItemSnapshotBase):

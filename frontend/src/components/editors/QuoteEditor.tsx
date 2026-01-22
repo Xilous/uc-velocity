@@ -102,6 +102,11 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
   const [isEditingWorkDescription, setIsEditingWorkDescription] = useState(false)
   const [savingWorkDescription, setSavingWorkDescription] = useState(false)
 
+  // PMS (Project Management Services) dialog states
+  const [pmsDialogOpen, setPmsDialogOpen] = useState(false)
+  const [pmsType, setPmsType] = useState<"percent" | "dollar">("dollar")
+  const [pmsValue, setPmsValue] = useState("")
+
   const fetchQuote = async () => {
     setLoading(true)
     setError(null)
@@ -329,9 +334,53 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
     }
   }
 
+  // PMS dialog handlers
+  const openPmsDialog = (type: "percent" | "dollar") => {
+    setPmsType(type)
+    setPmsValue("")
+    setPmsDialogOpen(true)
+  }
+
+  const handleAddPmsItem = async () => {
+    const value = parseFloat(pmsValue)
+    if (isNaN(value) || value <= 0) {
+      alert("Please enter a valid positive number")
+      return
+    }
+
+    const lineItem: QuoteLineItemCreate = {
+      item_type: "labor",
+      description: "Project Management Services",
+      quantity: 1,
+      is_pms: true,
+    }
+
+    if (pmsType === "percent") {
+      lineItem.pms_percent = value
+      // Set initial unit_price (will be recalculated dynamically on display)
+      lineItem.unit_price = calculateNonPmsTotal() * value / 100
+    } else {
+      lineItem.unit_price = value
+    }
+
+    try {
+      await api.quotes.addLine(quoteId, lineItem)
+      setPmsDialogOpen(false)
+      setPmsValue("")
+      fetchQuote()
+      onUpdate?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to add PMS item")
+    }
+  }
+
   const getLineItemDescription = (item: QuoteLineItem): string => {
-    if (item.item_type === "labor" && item.labor) {
-      return item.labor.description
+    if (item.item_type === "labor") {
+      if (item.labor) {
+        return item.labor.description
+      }
+      // PMS or custom labor item without inventory reference
+      return item.description || ""
     }
     if (item.item_type === "part" && item.part) {
       return item.part.part_number
@@ -374,9 +423,52 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
     return subtotal
   }
 
+  // Calculate total of non-PMS items (the base for PMS % calculations)
+  const calculateNonPmsTotal = (): number => {
+    if (!quote) return 0
+    return quote.line_items
+      .filter(item => !item.is_pms)
+      .reduce((sum, item) => sum + getLineItemTotal(item), 0)
+  }
+
+  // Get the effective unit price for a line item (handles PMS % dynamic calculation)
+  const getEffectiveUnitPrice = (item: QuoteLineItem): number => {
+    if (item.is_pms && item.pms_percent != null) {
+      // PMS % item: calculate dynamically based on non-PMS total
+      return calculateNonPmsTotal() * item.pms_percent / 100
+    }
+    return getLineItemUnitPrice(item)
+  }
+
+  // Get effective total for a line item (uses effective unit price for PMS % items)
+  const getEffectiveLineItemTotal = (item: QuoteLineItem): number => {
+    const unitPrice = getEffectiveUnitPrice(item)
+    const subtotal = unitPrice * item.quantity
+    if (item.discount_code) {
+      return subtotal * (1 - item.discount_code.discount_percent / 100)
+    }
+    return subtotal
+  }
+
   const calculateTotal = (): number => {
     if (!quote) return 0
-    return quote.line_items.reduce((sum, item) => sum + getLineItemTotal(item), 0)
+    const nonPmsTotal = calculateNonPmsTotal()
+    const pmsTotal = quote.line_items
+      .filter(item => item.is_pms)
+      .reduce((sum, item) => {
+        if (item.pms_percent != null) {
+          // PMS % item: calculate from non-PMS total
+          const unitPrice = nonPmsTotal * item.pms_percent / 100
+          let subtotal = unitPrice * item.quantity
+          if (item.discount_code) {
+            subtotal = subtotal * (1 - item.discount_code.discount_percent / 100)
+          }
+          return sum + subtotal
+        }
+        // PMS $ item: use the stored unit_price
+        return sum + getLineItemTotal(item)
+      }, 0)
+    return nonPmsTotal + pmsTotal
   }
 
   const getTypeIcon = (type: LineItemType) => {
@@ -761,8 +853,162 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
       {/* Parts Section */}
       {renderLineItemSection("Parts", partItems, "part", <Package className="h-4 w-4" />, "Add Part")}
 
-      {/* Labor Section */}
-      {renderLineItemSection("Labour", laborItems2, "labor", <Wrench className="h-4 w-4" />, "Add Labour")}
+      {/* Labor Section - Custom render with PMS buttons */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex justify-between items-center">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Wrench className="h-4 w-4" />
+              Labour
+            </CardTitle>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => openPmsDialog("dollar")}
+                className="gap-2"
+              >
+                <Plus className="h-4 w-4" />
+                Add PMS $
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => openPmsDialog("percent")}
+                className="gap-2"
+              >
+                <Plus className="h-4 w-4" />
+                Add PMS %
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => openAddDialog("labor")}
+                className="gap-2"
+              >
+                <Plus className="h-4 w-4" />
+                Add Labour
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {laborItems2.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No labour items yet.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Description</TableHead>
+                  <TableHead className="text-right">Qty Ordered</TableHead>
+                  <TableHead className="text-right">Qty Pending</TableHead>
+                  <TableHead className="text-right">Qty Fulfilled</TableHead>
+                  <TableHead className="text-right">Unit Price</TableHead>
+                  <TableHead className="text-center">Discount</TableHead>
+                  <TableHead className="text-right">Total</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {laborItems2.map((item) => {
+                  const staged = stagedFulfillments.get(item.id)
+                  const effectivePrice = getEffectiveUnitPrice(item)
+                  const effectiveSubtotal = effectivePrice * item.quantity
+                  const effectiveTotal = item.discount_code
+                    ? effectiveSubtotal * (1 - item.discount_code.discount_percent / 100)
+                    : effectiveSubtotal
+                  return (
+                    <TableRow key={item.id} className={staged ? "bg-green-50" : undefined}>
+                      <TableCell>
+                        <div>
+                          <span className="font-medium">{getLineItemDescription(item)}</span>
+                          {item.is_pms && item.pms_percent != null && (
+                            <span className="text-xs text-muted-foreground ml-1">({item.pms_percent}%)</span>
+                          )}
+                          {staged && (
+                            <Badge variant="outline" className="ml-2 bg-green-100 text-green-700 border-green-300">
+                              Staged: {staged}
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">{item.quantity}</TableCell>
+                      <TableCell className="text-right">
+                        <span className={item.qty_pending === 0 ? "text-muted-foreground" : ""}>
+                          {item.qty_pending}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span className={item.qty_fulfilled > 0 ? "text-green-600 font-medium" : "text-muted-foreground"}>
+                          {item.qty_fulfilled}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        ${effectivePrice.toFixed(2)}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {item.discount_code ? (
+                          <Badge variant="outline" className="gap-1">
+                            <Tag className="h-3 w-3" />
+                            {item.discount_code.code} (-{item.discount_code.discount_percent}%)
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {item.discount_code ? (
+                          <div>
+                            <span className="line-through text-muted-foreground text-sm">
+                              ${effectiveSubtotal.toFixed(2)}
+                            </span>
+                            <span className="ml-2 font-medium text-green-600">
+                              ${effectiveTotal.toFixed(2)}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="font-medium">${effectiveTotal.toFixed(2)}</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right space-x-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openEditDialog(item)}
+                          title="Edit"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openFulfillDialog(item)}
+                          disabled={item.qty_pending === 0}
+                          title="Fulfill"
+                          className={staged ? "text-green-600" : "text-blue-600"}
+                        >
+                          <ClipboardCheck className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteLine(item.id)}
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          title="Delete"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Misc Section */}
       {renderLineItemSection("Miscellaneous", miscItems2, "misc", <FileText className="h-4 w-4" />, "Add Misc")}
@@ -1098,6 +1344,51 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* PMS (Project Management Services) Dialog */}
+      <Dialog open={pmsDialogOpen} onOpenChange={setPmsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Wrench className="h-4 w-4" />
+              {pmsType === "percent" ? "Add PMS %" : "Add PMS $"}
+            </DialogTitle>
+            <DialogDescription>
+              {pmsType === "percent"
+                ? "Enter a percentage of the non-PMS quote total. This will dynamically update as the quote changes."
+                : "Enter the dollar amount for Project Management Services."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            {pmsType === "percent" && (
+              <div className="bg-muted/50 p-3 rounded-md">
+                <p className="text-sm text-muted-foreground">Current Non-PMS Total</p>
+                <p className="text-lg font-semibold">${calculateNonPmsTotal().toFixed(2)}</p>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>{pmsType === "percent" ? "Percentage (%)" : "Amount ($)"}</Label>
+              <Input
+                type="number"
+                step={pmsType === "percent" ? "0.1" : "0.01"}
+                min="0"
+                value={pmsValue}
+                onChange={(e) => setPmsValue(e.target.value)}
+                placeholder={pmsType === "percent" ? "e.g., 10" : "e.g., 500.00"}
+              />
+              {pmsType === "percent" && pmsValue && !isNaN(parseFloat(pmsValue)) && (
+                <p className="text-sm text-muted-foreground">
+                  = ${(calculateNonPmsTotal() * parseFloat(pmsValue) / 100).toFixed(2)}
+                </p>
+              )}
+            </div>
+            <Button onClick={handleAddPmsItem} className="w-full">
+              <Plus className="h-4 w-4 mr-2" />
+              Add Project Management Services
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
