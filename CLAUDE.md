@@ -6,7 +6,7 @@ A desktop-focused ERP application for Windows that manages Customers, Vendors, I
 
 ### Technology Stack
 
-- **Backend:** Python 3.10+ (FastAPI, SQLAlchemy, SQLite, Pydantic)
+- **Backend:** Python 3.10+ (FastAPI, SQLAlchemy, PostgreSQL, Pydantic, Alembic)
 - **Frontend:** React (Vite, TypeScript, Tailwind CSS, shadcn/ui)
 - **Distribution:** Electron (future - wrapping the local web server)
 
@@ -45,154 +45,98 @@ A desktop-focused ERP application for Windows that manages Customers, Vendors, I
 UC Velocity/
 ├── backend/
 │   ├── __init__.py
-│   ├── main.py              # FastAPI app entry point
-│   ├── database.py          # SQLite connection and session management
-│   ├── models.py            # SQLAlchemy ORM models
-│   ├── schemas.py           # Pydantic validation schemas
-│   ├── requirements.txt     # Python dependencies
+│   ├── main.py
+│   ├── database.py
+│   ├── models.py
+│   ├── schemas.py
+│   ├── requirements.txt
+│   ├── alembic.ini
+│   ├── alembic/
+│   │   ├── env.py
+│   │   ├── script.py.mako
+│   │   └── versions/        # Migration files
 │   └── routes/
 │       ├── __init__.py
-│       ├── parts.py         # Parts CRUD endpoints
-│       ├── labor.py         # Labor CRUD with part linking
-│       ├── profiles.py      # Profiles CRUD (customers/vendors)
-│       ├── projects.py      # [NOT IMPLEMENTED] Projects CRUD
-│       ├── quotes.py        # [NOT IMPLEMENTED] Quotes + line items
-│       └── purchase_orders.py # [NOT IMPLEMENTED] POs + line items
+│       ├── parts.py
+│       ├── labor.py
+│       ├── profiles.py
+│       ├── projects.py
+│       ├── quotes.py
+│       └── purchase_orders.py
 ├── frontend/
 │   ├── src/
 │   │   ├── main.tsx
-│   │   ├── App.tsx          # Main app with inventory dashboard
-│   │   ├── index.css        # Tailwind CSS imports
-│   │   ├── lib/utils.ts     # cn() utility for shadcn
-│   │   ├── api/client.ts    # Typed API client
-│   │   ├── types/index.ts   # TypeScript interfaces
+│   │   ├── App.tsx
+│   │   ├── index.css
+│   │   ├── lib/utils.ts
+│   │   ├── api/client.ts
+│   │   ├── types/index.ts
 │   │   ├── components/
-│   │   │   ├── ui/          # shadcn/ui components
+│   │   │   ├── ui/
 │   │   │   └── forms/
-│   │   │       ├── PartForm.tsx
-│   │   │       └── LaborForm.tsx
-│   │   └── pages/           # [NOT IMPLEMENTED]
-│   │       ├── ProjectList.tsx
-│   │       ├── ProjectDetails.tsx
-│   │       └── DocumentEditor.tsx
+│   │   └── pages/
 │   ├── package.json
 │   ├── vite.config.ts
 │   ├── tailwind.config.js
 │   └── tsconfig.json
-└── CLAUDE.md                # This file
+└── CLAUDE.md
 ```
-
----
-
-## Implementation Status
-
-### Completed
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| Database connection (SQLite) | ✅ Done | `backend/database.py` |
-| SQLAlchemy models | ✅ Done | All models defined in `backend/models.py` |
-| Pydantic schemas | ✅ Done | All schemas defined in `backend/schemas.py` |
-| Parts API routes | ✅ Done | Full CRUD at `/parts/` |
-| Labor API routes | ✅ Done | Full CRUD at `/labor/` with atomic part linking |
-| Frontend setup (Vite/React/TS) | ✅ Done | |
-| Tailwind CSS + shadcn/ui | ✅ Done | Button, Input, Label, Dialog, Tabs, Popover, Command, Badge |
-| Multi-select component | ✅ Done | For linking parts to labor |
-| Inventory Dashboard | ✅ Done | Parts and Labor tabs with CRUD |
-| PartForm component | ✅ Done | Create new parts |
-| LaborForm component | ✅ Done | Create labor with linked parts |
-
-### Not Implemented (Remaining Work)
-
-#### Backend Routes Needed
-
-| Route | Endpoints | Priority |
-|-------|-----------|----------|
-| Profiles | `GET/POST/PUT/DELETE /profiles/` | ✅ Done |
-| Projects | `GET/POST/PUT/DELETE /projects/`, `GET /projects/{id}` (full nested) | ✅ Done |
-| Quotes | `GET/POST/PUT/DELETE /quotes/`, line item management | ✅ Done |
-| Purchase Orders | `GET/POST/PUT/DELETE /purchase-orders/`, line item management | ✅ Done |
-| Categories | `GET/POST /categories/` | Low |
-
-#### Frontend Pages Needed
-
-| Page | Description | Priority |
-|------|-------------|----------|
-| Profile Management | List, create, edit customers/vendors | ✅ Done |
-| Project List | View all projects with status | ✅ Done |
-| Project Details | Header with customer, sidebar with Quotes/POs list | ✅ Done |
-| Document Editor (Quote) | Editable table for Labor, Parts, Misc line items | ✅ Done |
-| Document Editor (PO) | Editable table for Parts, Misc only (NO Labor button) | ✅ Done |
-
-#### Key Implementation Notes
-
-1. **Quote Line Items:** Can be Labor (with implicit parts cost), standalone Parts, or Misc
-2. **PO Line Items:** Can ONLY be Parts or Misc - Labor must be disabled/hidden
-3. **Project Details View:**
-   - Header: Customer info
-   - Left Sidebar: List of Quotes and POs
-   - Main Content: Selected document rendered as editable table
-4. **Cost Calculations:**
-   - Labor cost: `hours * rate * (1 + markup_percent/100)`
-   - Total with parts: Labor cost + sum of linked parts costs
 
 ---
 
 ## API Endpoints
 
-### Implemented
-
 ```
 GET    /                    # Health check
 GET    /health              # Health check
-GET    /parts/              # List all parts
-POST   /parts/              # Create part
-GET    /parts/{id}          # Get part by ID
-PUT    /parts/{id}          # Update part
-DELETE /parts/{id}          # Delete part
-GET    /labor/              # List all labor (with nested parts)
-POST   /labor/              # Create labor with linked_part_ids
-GET    /labor/{id}          # Get labor by ID
-PUT    /labor/{id}          # Update labor and part links
-DELETE /labor/{id}          # Delete labor
-```
 
-### Implemented (continued)
+# Parts
+GET    /parts/
+POST   /parts/
+GET    /parts/{id}
+PUT    /parts/{id}
+DELETE /parts/{id}
 
-```
+# Labor
+GET    /labor/
+POST   /labor/
+GET    /labor/{id}
+PUT    /labor/{id}
+DELETE /labor/{id}
+
 # Profiles
-GET    /profiles/           # List all profiles
-POST   /profiles/           # Create profile
-GET    /profiles/{id}       # Get profile by ID
-PUT    /profiles/{id}       # Update profile
-DELETE /profiles/{id}       # Delete profile
+GET    /profiles/
+POST   /profiles/
+GET    /profiles/{id}
+PUT    /profiles/{id}
+DELETE /profiles/{id}
 
 # Projects
-GET    /projects/           # List all projects
-POST   /projects/           # Create project
-GET    /projects/{id}       # Get project with nested quotes/POs
-PUT    /projects/{id}       # Update project
-DELETE /projects/{id}       # Delete project
+GET    /projects/
+POST   /projects/
+GET    /projects/{id}
+PUT    /projects/{id}
+DELETE /projects/{id}
 
 # Quotes
-GET    /quotes/             # List all quotes
-POST   /quotes/             # Create quote
-GET    /quotes/{id}         # Get quote with line items
-PUT    /quotes/{id}         # Update quote
-DELETE /quotes/{id}         # Delete quote
-POST   /quotes/{id}/lines   # Add line item
-PUT    /quotes/{id}/lines/{line_id}    # Update line item
-DELETE /quotes/{id}/lines/{line_id}    # Delete line item
+GET    /quotes/
+POST   /quotes/
+GET    /quotes/{id}
+PUT    /quotes/{id}
+DELETE /quotes/{id}
+POST   /quotes/{id}/lines
+PUT    /quotes/{id}/lines/{line_id}
+DELETE /quotes/{id}/lines/{line_id}
 
 # Purchase Orders
-GET    /purchase-orders/    # List all POs
-POST   /purchase-orders/    # Create PO
-GET    /purchase-orders/{id}           # Get PO with line items
-PUT    /purchase-orders/{id}           # Update PO
-DELETE /purchase-orders/{id}           # Delete PO
-POST   /purchase-orders/{id}/lines     # Add line item
-PUT    /purchase-orders/{id}/lines/{line_id}    # Update line item
-DELETE /purchase-orders/{id}/lines/{line_id}    # Delete line item
+GET    /purchase-orders/
+POST   /purchase-orders/
+GET    /purchase-orders/{id}
+PUT    /purchase-orders/{id}
+DELETE /purchase-orders/{id}
+POST   /purchase-orders/{id}/lines
+PUT    /purchase-orders/{id}/lines/{line_id}
+DELETE /purchase-orders/{id}/lines/{line_id}
 ```
 
 ---
@@ -241,6 +185,57 @@ App available at: http://localhost:5173
    - Labor-Parts linking must be atomic (all or nothing)
    - PurchaseOrders must NEVER include Labor line items
    - Quotes can include Labor, Parts, and Misc items
+
+---
+
+## Database Migrations (Alembic)
+
+This project uses **Alembic** for database schema migrations. Migrations run automatically on Railway deploy via the `releaseCommand` in `railway.toml`.
+
+**Note:** There is no local PostgreSQL - all development and testing uses Railway's live PostgreSQL database.
+
+### Creating a New Migration
+
+When you modify `backend/models.py`, generate a migration against Railway's database:
+
+```bash
+cd backend
+# Set DATABASE_URL to Railway's PostgreSQL (get from Railway dashboard or variables)
+set DATABASE_URL=postgresql://...your-railway-url...
+alembic revision --autogenerate -m "description_of_change"
+```
+
+Or use the `.env` file with the Railway DATABASE_URL temporarily.
+
+Review the generated file in `backend/alembic/versions/` before committing.
+
+### Useful Commands
+
+```bash
+# These require DATABASE_URL to be set to Railway's PostgreSQL
+alembic current       # Show current revision
+alembic history       # Show migration history
+alembic upgrade head  # Apply pending migrations (also runs on deploy)
+alembic downgrade -1  # Rollback one migration
+```
+
+### Production (Railway)
+
+Migrations run automatically on deploy via Railway's `releaseCommand`. The workflow:
+
+1. Push code to GitHub
+2. Railway auto-deploys
+3. `alembic upgrade head` runs before the app starts
+4. PostgreSQL schema is updated automatically
+
+### Workflow After Model Changes
+
+1. Modify `backend/models.py`
+2. Set `DATABASE_URL` to Railway's PostgreSQL connection string
+3. Generate migration: `alembic revision --autogenerate -m "description"`
+4. Review the generated migration file
+5. Commit and push to GitHub
+6. Railway auto-deploys and runs the migration automatically
 
 ---
 

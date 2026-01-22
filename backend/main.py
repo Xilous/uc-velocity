@@ -12,19 +12,19 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine, Base, SessionLocal
 from routes import parts, labor, profiles, projects, quotes, purchase_orders, discount_codes, miscellaneous, invoices
-from db_migrations import run_migrations
 from seed import seed_system_items
 
-# Create all database tables
+# Note: Database schema migrations are handled by Alembic.
+# - Production (Railway): Runs automatically via releaseCommand in railway.toml
+# - Local development: Run `alembic upgrade head` before starting the server
+
+# Create all database tables (idempotent - safe fallback for fresh installs)
 Base.metadata.create_all(bind=engine)
 
-# Run migrations and seed system items on startup
+# Seed system items on startup
 def init_db():
     db = SessionLocal()
     try:
-        # Run any pending migrations first
-        run_migrations(db)
-        # Then seed system items
         seed_system_items(db)
     finally:
         db.close()
