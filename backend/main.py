@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine, Base, SessionLocal
 from routes import parts, labor, profiles, projects, quotes, purchase_orders, discount_codes, miscellaneous, invoices
-from migrations import run_migrations
+from db_migrations import run_migrations
 from seed import seed_system_items
 
 # Create all database tables
