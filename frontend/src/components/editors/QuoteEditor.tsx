@@ -28,6 +28,13 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { SearchableSelect, SearchableSelectOption } from "@/components/ui/searchable-select"
 import { api } from "@/api/client"
 import type {
@@ -35,7 +42,7 @@ import type {
   LineItemType, Part, Labor, Miscellaneous, DiscountCode, QuoteStatus,
   StagedFulfillment, InvoiceCreate
 } from "@/types"
-import { Plus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent } from "lucide-react"
+import { Plus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info } from "lucide-react"
 import { QuoteAuditTrail } from "./QuoteAuditTrail"
 import { PartForm } from "@/components/forms/PartForm"
 import { LaborForm } from "@/components/forms/LaborForm"
@@ -534,6 +541,65 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
         return sum + getLineItemTotal(item)
       }, 0)
     return nonPmsTotal + pmsTotal
+  }
+
+  // Calculate weighted average markup percentage
+  // Formula: Σ(Markup% × Base Cost × Qty) / Σ(Base Cost × Qty)
+  const calculateAverageMarkup = (): number => {
+    if (!quote || quote.line_items.length === 0) return 0
+
+    let totalWeightedMarkup = 0
+    let totalBaseCost = 0
+
+    for (const item of quote.line_items) {
+      let baseCost = 0
+      let markupPercent = 0
+
+      if (item.part) {
+        baseCost = item.part.cost
+        markupPercent = item.part.markup_percent ?? 0
+      } else if (item.labor) {
+        baseCost = item.labor.hours * item.labor.rate
+        markupPercent = item.labor.markup_percent
+      } else if (item.miscellaneous) {
+        baseCost = item.miscellaneous.hours * item.miscellaneous.rate
+        markupPercent = item.miscellaneous.markup_percent
+      }
+
+      // PMS items have 0 markup by definition
+      if (item.is_pms) {
+        markupPercent = 0
+      }
+
+      const weightedCost = baseCost * item.quantity
+      totalWeightedMarkup += markupPercent * weightedCost
+      totalBaseCost += weightedCost
+    }
+
+    return totalBaseCost > 0 ? totalWeightedMarkup / totalBaseCost : 0
+  }
+
+  // Calculate total margin percentage
+  // Margin = (Selling Price - Manufacturing Cost) / Selling Price × 100
+  // Manufacturing cost = Parts cost only (Labor/Misc have 0 mfg cost)
+  const calculateTotalMargin = (): number => {
+    if (!quote) return 0
+
+    const totalSellingPrice = calculateTotal()
+    if (totalSellingPrice === 0) return 0
+
+    let totalManufacturingCost = 0
+
+    for (const item of quote.line_items) {
+      // Only Parts have manufacturing cost
+      if (item.part) {
+        totalManufacturingCost += item.part.cost * item.quantity
+      }
+      // Labor and Misc have 0 manufacturing cost
+      // PMS items also have 0 manufacturing cost
+    }
+
+    return ((totalSellingPrice - totalManufacturingCost) / totalSellingPrice) * 100
   }
 
   const getTypeIcon = (type: LineItemType) => {
@@ -1115,9 +1181,60 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
       {/* Total Summary */}
       <Card>
         <CardContent className="pt-6">
-          <div className="flex justify-between items-center">
-            <span className="text-lg font-semibold">Quote Total:</span>
-            <span className="text-2xl font-bold">${calculateTotal().toFixed(2)}</span>
+          <div className="space-y-4">
+            {/* Average Markup with formula tooltip */}
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-muted-foreground">Average Markup:</span>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">
+                      <p className="text-xs">
+                        Weighted Average = Σ(Markup% × Base Cost × Qty) / Σ(Base Cost × Qty)
+                      </p>
+                      <p className="text-xs mt-1 text-muted-foreground">
+                        Parts: Base Cost = Part Cost | Labor/Misc: Base Cost = Hours × Rate
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <span className="text-lg font-semibold">{calculateAverageMarkup().toFixed(2)}%</span>
+            </div>
+
+            {/* Total Margin with formula tooltip */}
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-muted-foreground">Total Margin:</span>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">
+                      <p className="text-xs">
+                        Margin % = (Selling Price - Mfg Cost) / Selling Price × 100
+                      </p>
+                      <p className="text-xs mt-1 text-muted-foreground">
+                        Manufacturing Cost = Parts cost only (Labor/Misc = $0)
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <span className="text-lg font-semibold">{calculateTotalMargin().toFixed(2)}%</span>
+            </div>
+
+            <Separator />
+
+            {/* Quote Total (existing) */}
+            <div className="flex justify-between items-center">
+              <span className="text-lg font-semibold">Quote Total:</span>
+              <span className="text-2xl font-bold">${calculateTotal().toFixed(2)}</span>
+            </div>
           </div>
         </CardContent>
       </Card>
