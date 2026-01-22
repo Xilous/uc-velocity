@@ -113,7 +113,7 @@ def calculate_base_cost(item: QuoteLineItem, db: Session) -> float:
 
     - Part: part.cost
     - Labor: labor.rate * labor.hours
-    - Misc (linked): misc.rate * misc.hours
+    - Misc (linked): misc.unit_price
     - Misc (not linked): current unit_price (treated as base)
     - PMS items: returns 0 (they are exempt)
     """
@@ -131,7 +131,7 @@ def calculate_base_cost(item: QuoteLineItem, db: Session) -> float:
     if item.item_type == "misc":
         if item.misc_id:
             misc = db.query(Miscellaneous).filter(Miscellaneous.id == item.misc_id).first()
-            return misc.rate * misc.hours if misc else 0
+            return misc.unit_price if misc else 0
         else:
             # Misc without linked inventory - treat unit_price as base cost
             return item.unit_price or 0

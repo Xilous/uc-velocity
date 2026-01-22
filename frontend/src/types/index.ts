@@ -42,16 +42,15 @@ export interface PartCreate {
 export interface Miscellaneous {
   id: number;
   description: string;
-  hours: number;
-  rate: number;
+  unit_price: number;
   markup_percent: number;
   category_id?: number;
+  is_system_item: boolean;
 }
 
 export interface MiscellaneousCreate {
   description: string;
-  hours: number;
-  rate: number;
+  unit_price: number;
   markup_percent: number;
   category_id?: number;
 }

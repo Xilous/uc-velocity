@@ -103,6 +103,10 @@ export const api = {
       request<Miscellaneous>(`/misc/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: number) =>
       request<{ message: string }>(`/misc/${id}`, { method: 'DELETE' }),
+    // System items
+    getSystemItems: () => request<Miscellaneous[]>('/misc/system-items/'),
+    getParkingItem: () => request<Miscellaneous>('/misc/system-items/parking'),
+    getTravelDistanceItems: () => request<Miscellaneous[]>('/misc/system-items/travel-distance'),
   },
 
   // ===== Discount Codes =====

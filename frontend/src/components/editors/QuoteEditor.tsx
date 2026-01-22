@@ -42,7 +42,7 @@ import type {
   LineItemType, Part, Labor, Miscellaneous, DiscountCode, QuoteStatus,
   StagedFulfillment, InvoiceCreate
 } from "@/types"
-import { Plus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info, Copy } from "lucide-react"
+import { Plus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info, Copy, Car, MapPin } from "lucide-react"
 import { QuoteAuditTrail } from "./QuoteAuditTrail"
 import { PartForm } from "@/components/forms/PartForm"
 import { LaborForm } from "@/components/forms/LaborForm"
@@ -128,6 +128,13 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
   // Clone quote state
   const [isCloning, setIsCloning] = useState(false)
+
+  // Parking and Travel Distance dialog states
+  const [travelDistanceDialogOpen, setTravelDistanceDialogOpen] = useState(false)
+  const [travelDistanceItems, setTravelDistanceItems] = useState<Miscellaneous[]>([])
+  const [selectedTravelDistanceId, setSelectedTravelDistanceId] = useState<string>("")
+  const [addingParking, setAddingParking] = useState(false)
+  const [addingTravelDistance, setAddingTravelDistance] = useState(false)
 
   const fetchQuote = async () => {
     setLoading(true)
@@ -216,7 +223,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       lineItem.misc_id = parseInt(selectedMiscId)
       const misc = miscItems.find((m) => m.id === lineItem.misc_id)
       if (misc) {
-        lineItem.unit_price = misc.rate * misc.hours * (1 + misc.markup_percent / 100)
+        lineItem.unit_price = misc.unit_price * (1 + misc.markup_percent / 100)
       }
     }
 
@@ -488,7 +495,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       return item.part.cost * (1 + (item.part.markup_percent ?? 0) / 100)
     }
     if (item.miscellaneous) {
-      return item.miscellaneous.hours * item.miscellaneous.rate * (1 + item.miscellaneous.markup_percent / 100)
+      return item.miscellaneous.unit_price * (1 + item.miscellaneous.markup_percent / 100)
     }
     return 0
   }
@@ -572,7 +579,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         baseCost = item.labor.hours * item.labor.rate
         markupPercent = item.labor.markup_percent
       } else if (item.miscellaneous) {
-        baseCost = item.miscellaneous.hours * item.miscellaneous.rate
+        baseCost = item.miscellaneous.unit_price
         markupPercent = item.miscellaneous.markup_percent
       }
 
@@ -610,6 +617,146 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     }
 
     return ((totalSellingPrice - totalManufacturingCost) / totalSellingPrice) * 100
+  }
+
+  // Calculate total labor hours (excluding PMS items)
+  const calculateTotalLaborHours = (): number => {
+    if (!quote) return 0
+    return quote.line_items
+      .filter(item => item.item_type === "labor" && !item.is_pms && item.labor)
+      .reduce((sum, item) => {
+        const laborHours = item.labor?.hours || 0
+        return sum + (laborHours * item.quantity)
+      }, 0)
+  }
+
+  // Round up to nearest 8
+  const roundUpToNearest8 = (value: number): number => {
+    return Math.ceil(value / 8) * 8
+  }
+
+  // Fetch travel distance items for dialog
+  const fetchTravelDistanceItems = async () => {
+    try {
+      const items = await api.misc.getTravelDistanceItems()
+      setTravelDistanceItems(items)
+    } catch (err) {
+      console.error("Failed to fetch travel distance items", err)
+    }
+  }
+
+  // Handler for "Calculate & Add Parking" button
+  const handleCalculateAndAddParking = async () => {
+    if (!quote) return
+
+    setAddingParking(true)
+    try {
+      // Get the parking system item
+      const parkingItem = await api.misc.getParkingItem()
+
+      // Calculate total labor hours (excluding PMS)
+      const totalLaborHours = calculateTotalLaborHours()
+
+      // Round up to nearest 8
+      const parkingQty = roundUpToNearest8(totalLaborHours)
+
+      if (parkingQty === 0) {
+        alert("No labor hours to calculate parking from. Add labor items first.")
+        return
+      }
+
+      // Check if parking line item already exists in quote
+      const existingParkingLine = quote.line_items.find(
+        item => item.item_type === "misc" &&
+                item.misc_id === parkingItem.id
+      )
+
+      if (existingParkingLine) {
+        // Update existing line item quantity
+        await api.quotes.updateLine(quoteId, existingParkingLine.id, {
+          quantity: parkingQty
+        })
+      } else {
+        // Add new line item
+        const lineItem: QuoteLineItemCreate = {
+          item_type: "misc",
+          misc_id: parkingItem.id,
+          quantity: parkingQty,
+          unit_price: parkingItem.unit_price * (1 + parkingItem.markup_percent / 100)
+        }
+        await api.quotes.addLine(quoteId, lineItem)
+      }
+
+      fetchQuote()
+      onUpdate?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to add parking")
+    } finally {
+      setAddingParking(false)
+    }
+  }
+
+  // Handler for "Calculate & Add Travel Distance" button - opens dialog
+  const handleOpenTravelDistanceDialog = async () => {
+    await fetchTravelDistanceItems()
+    setSelectedTravelDistanceId("")
+    setTravelDistanceDialogOpen(true)
+  }
+
+  // Handler for confirming travel distance selection
+  const handleConfirmTravelDistance = async () => {
+    if (!quote || !selectedTravelDistanceId) return
+
+    setAddingTravelDistance(true)
+    try {
+      const selectedItem = travelDistanceItems.find(
+        item => item.id.toString() === selectedTravelDistanceId
+      )
+
+      if (!selectedItem) {
+        alert("Please select a travel distance option")
+        return
+      }
+
+      // Calculate days = total labor hours / 8, rounded up
+      const totalLaborHours = calculateTotalLaborHours()
+      const days = Math.ceil(totalLaborHours / 8)
+
+      if (days === 0) {
+        alert("No labor hours to calculate travel distance from. Add labor items first.")
+        return
+      }
+
+      // Check if this travel distance item already exists in quote
+      const existingLine = quote.line_items.find(
+        item => item.item_type === "misc" &&
+                item.misc_id === selectedItem.id
+      )
+
+      if (existingLine) {
+        // Update existing line item quantity
+        await api.quotes.updateLine(quoteId, existingLine.id, {
+          quantity: days
+        })
+      } else {
+        // Add new line item
+        const lineItem: QuoteLineItemCreate = {
+          item_type: "misc",
+          misc_id: selectedItem.id,
+          quantity: days,
+          unit_price: selectedItem.unit_price * (1 + selectedItem.markup_percent / 100)
+        }
+        await api.quotes.addLine(quoteId, lineItem)
+      }
+
+      setTravelDistanceDialogOpen(false)
+      fetchQuote()
+      onUpdate?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to add travel distance")
+    } finally {
+      setAddingTravelDistance(false)
+    }
   }
 
   const getTypeIcon = (type: LineItemType) => {
@@ -800,7 +947,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     items: QuoteLineItem[],
     type: LineItemType,
     icon: React.ReactNode,
-    addButtonLabel: string
+    addButtonLabel: string,
+    extraButtons?: React.ReactNode
   ) => (
     <Card>
       <CardHeader className="pb-3">
@@ -828,6 +976,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               <Tag className="h-4 w-4 mr-1" />
               Discount All
             </Button>
+            {extraButtons}
             <Button
               variant="outline"
               size="sm"
@@ -1307,7 +1456,29 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       </Card>
 
       {/* Misc Section */}
-      {renderLineItemSection("Miscellaneous", miscItems2, "misc", <FileText className="h-4 w-4" />, "Add Misc")}
+      {renderLineItemSection("Miscellaneous", miscItems2, "misc", <FileText className="h-4 w-4" />, "Add Misc", (
+        <>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCalculateAndAddParking}
+            disabled={addingParking}
+            className="gap-2"
+          >
+            <Car className="h-4 w-4" />
+            {addingParking ? "Adding..." : "Parking"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleOpenTravelDistanceDialog}
+            className="gap-2"
+          >
+            <MapPin className="h-4 w-4" />
+            Travel
+          </Button>
+        </>
+      ))}
 
       {/* Total Summary */}
       <Card>
@@ -1327,7 +1498,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                         Weighted Average = Σ(Markup% × Base Cost × Qty) / Σ(Base Cost × Qty)
                       </p>
                       <p className="text-xs mt-1 text-muted-foreground">
-                        Parts: Base Cost = Part Cost | Labor/Misc: Base Cost = Hours × Rate
+                        Parts: Base Cost = Part Cost | Labor: Hours × Rate | Misc: Unit Price
                       </p>
                     </TooltipContent>
                   </Tooltip>
@@ -1473,7 +1644,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                   options={miscItems.map((misc): SearchableSelectOption => ({
                     value: misc.id.toString(),
                     label: misc.description,
-                    description: `$${(misc.rate * misc.hours * (1 + misc.markup_percent / 100)).toFixed(2)}`,
+                    description: `$${(misc.unit_price * (1 + misc.markup_percent / 100)).toFixed(2)}`,
                   }))}
                   value={selectedMiscId}
                   onChange={setSelectedMiscId}
@@ -1835,6 +2006,77 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               disabled={!selectedBulkDiscountCodeId || applyingDiscount}
             >
               {applyingDiscount ? "Applying..." : "Apply to All"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Travel Distance Selection Dialog */}
+      <Dialog open={travelDistanceDialogOpen} onOpenChange={setTravelDistanceDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MapPin className="h-4 w-4" />
+              Select Travel Distance
+            </DialogTitle>
+            <DialogDescription>
+              Choose a travel distance tier. The quantity will be calculated as days (labor hours / 8, rounded up).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="bg-muted/50 p-3 rounded-md">
+              <p className="text-sm text-muted-foreground">Total Labor Hours (excl. PMS)</p>
+              <p className="text-lg font-semibold">{calculateTotalLaborHours().toFixed(1)} hours</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                = {Math.ceil(calculateTotalLaborHours() / 8) || 0} day(s)
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Travel Distance Tier</Label>
+              <Select
+                value={selectedTravelDistanceId}
+                onValueChange={setSelectedTravelDistanceId}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select travel distance..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {travelDistanceItems.map(item => (
+                    <SelectItem key={item.id} value={item.id.toString()}>
+                      {item.description} - ${(item.unit_price * (1 + item.markup_percent / 100)).toFixed(2)}/day
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {selectedTravelDistanceId && (
+              <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-md">
+                <p className="text-sm font-medium">Preview:</p>
+                <p className="text-sm">
+                  {Math.ceil(calculateTotalLaborHours() / 8)} day(s) x $
+                  {(travelDistanceItems.find(i => i.id.toString() === selectedTravelDistanceId)?.unit_price ?? 0) *
+                   (1 + (travelDistanceItems.find(i => i.id.toString() === selectedTravelDistanceId)?.markup_percent ?? 0) / 100)
+                  }
+                  {" = $"}
+                  {(Math.ceil(calculateTotalLaborHours() / 8) *
+                    (travelDistanceItems.find(i => i.id.toString() === selectedTravelDistanceId)?.unit_price ?? 0) *
+                    (1 + (travelDistanceItems.find(i => i.id.toString() === selectedTravelDistanceId)?.markup_percent ?? 0) / 100)
+                  ).toFixed(2)}
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTravelDistanceDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmTravelDistance}
+              disabled={!selectedTravelDistanceId || addingTravelDistance}
+            >
+              {addingTravelDistance ? "Adding..." : "Add Travel Distance"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -30,7 +30,9 @@ import {
   Boxes,
   Tag,
   FileText,
+  Lock,
 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 
 type AppView = "profiles" | "projects" | "project-details" | "inventory" | "discount-codes"
 
@@ -420,10 +422,7 @@ function App() {
                             Misc Description
                           </th>
                           <th className="px-4 py-3 text-right text-sm font-medium text-muted-foreground">
-                            Hours
-                          </th>
-                          <th className="px-4 py-3 text-right text-sm font-medium text-muted-foreground">
-                            Rate
+                            Unit Price
                           </th>
                           <th className="px-4 py-3 text-right text-sm font-medium text-muted-foreground">
                             Markup
@@ -440,19 +439,24 @@ function App() {
                         {miscItems.map((misc) => (
                           <tr key={misc.id} className="hover:bg-muted/50">
                             <td className="px-4 py-3 text-sm font-medium">
-                              {misc.description}
+                              <div className="flex items-center gap-2">
+                                {misc.description}
+                                {misc.is_system_item && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    <Lock className="h-3 w-3 mr-1" />
+                                    System
+                                  </Badge>
+                                )}
+                              </div>
                             </td>
                             <td className="px-4 py-3 text-sm text-muted-foreground text-right">
-                              {misc.hours}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-muted-foreground text-right">
-                              ${misc.rate.toFixed(2)}/hr
+                              ${misc.unit_price.toFixed(2)}
                             </td>
                             <td className="px-4 py-3 text-sm text-muted-foreground text-right">
                               {misc.markup_percent}%
                             </td>
                             <td className="px-4 py-3 text-sm font-medium text-right">
-                              ${(misc.hours * misc.rate * (1 + misc.markup_percent / 100)).toFixed(2)}
+                              ${(misc.unit_price * (1 + misc.markup_percent / 100)).toFixed(2)}
                             </td>
                             <td className="px-4 py-3 text-right space-x-1">
                               <Button
@@ -466,7 +470,11 @@ function App() {
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => handleDeleteMisc(misc.id)}
-                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                disabled={misc.is_system_item}
+                                className={`text-destructive hover:text-destructive hover:bg-destructive/10 ${
+                                  misc.is_system_item ? 'opacity-50 cursor-not-allowed' : ''
+                                }`}
+                                title={misc.is_system_item ? "System items cannot be deleted" : "Delete"}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>

@@ -91,8 +91,7 @@ class Labor(LaborBase):
 # ===== Miscellaneous Schemas =====
 class MiscellaneousBase(BaseModel):
     description: str
-    hours: float = 1.0
-    rate: float
+    unit_price: float
     markup_percent: float = 0.0
     category_id: Optional[int] = None
 
@@ -103,14 +102,14 @@ class MiscellaneousCreate(MiscellaneousBase):
 
 class MiscellaneousUpdate(BaseModel):
     description: Optional[str] = None
-    hours: Optional[float] = None
-    rate: Optional[float] = None
+    unit_price: Optional[float] = None
     markup_percent: Optional[float] = None
     category_id: Optional[int] = None
 
 
 class Miscellaneous(MiscellaneousBase):
     id: int
+    is_system_item: bool = False
 
     class Config:
         from_attributes = True

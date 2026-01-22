@@ -114,10 +114,10 @@ class Miscellaneous(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     description = Column(String, nullable=False)
-    hours = Column(Float, nullable=False, default=1.0)
-    rate = Column(Float, nullable=False)
+    unit_price = Column(Float, nullable=False)
     markup_percent = Column(Float, default=0.0)
     category_id = Column(Integer, ForeignKey('categories.id'))
+    is_system_item = Column(Boolean, default=False)
 
     # Relationships
     category = relationship("Category")

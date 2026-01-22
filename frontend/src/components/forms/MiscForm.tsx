@@ -19,25 +19,22 @@ export function MiscForm({ misc, onSuccess, onCancel }: MiscFormProps) {
 
   // Form state - use strings for number fields to allow empty while editing
   const [description, setDescription] = useState("")
-  const [hours, setHours] = useState("")
-  const [rate, setRate] = useState("")
+  const [unitPrice, setUnitPrice] = useState("")
   const [markupPercent, setMarkupPercent] = useState("")
 
   // Populate form when editing
   useEffect(() => {
     if (misc) {
       setDescription(misc.description)
-      setHours(misc.hours.toString())
-      setRate(misc.rate.toString())
+      setUnitPrice(misc.unit_price.toString())
       setMarkupPercent(misc.markup_percent.toString())
     }
   }, [misc])
 
   // Calculate misc cost (use parsed values or 0 for display)
-  const hoursNum = parseFloat(hours) || 0
-  const rateNum = parseFloat(rate) || 0
+  const unitPriceNum = parseFloat(unitPrice) || 0
   const markupNum = parseFloat(markupPercent) || 0
-  const miscCost = hoursNum * rateNum * (1 + markupNum / 100)
+  const miscCost = unitPriceNum * (1 + markupNum / 100)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -46,8 +43,7 @@ export function MiscForm({ misc, onSuccess, onCancel }: MiscFormProps) {
 
     const miscData: MiscellaneousCreate = {
       description,
-      hours: parseFloat(hours) || 1,
-      rate: parseFloat(rate) || 0,
+      unit_price: parseFloat(unitPrice) || 0,
       markup_percent: parseFloat(markupPercent) || 0,
     }
 
@@ -84,30 +80,16 @@ export function MiscForm({ misc, onSuccess, onCancel }: MiscFormProps) {
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label htmlFor="hours">Hours</Label>
+          <Label htmlFor="unitPrice">Unit Price ($)</Label>
           <Input
-            id="hours"
-            type="number"
-            step="0.5"
-            min="0"
-            value={hours}
-            onChange={(e) => setHours(e.target.value)}
-            placeholder="1"
-            required
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="rate">Hourly Rate ($)</Label>
-          <Input
-            id="rate"
+            id="unitPrice"
             type="number"
             step="0.01"
             min="0"
-            value={rate}
-            onChange={(e) => setRate(e.target.value)}
+            value={unitPrice}
+            onChange={(e) => setUnitPrice(e.target.value)}
             placeholder="0.00"
             required
           />
@@ -142,7 +124,7 @@ export function MiscForm({ misc, onSuccess, onCancel }: MiscFormProps) {
         <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" disabled={loading || !description || !hours || !rate}>
+        <Button type="submit" disabled={loading || !description || !unitPrice}>
           {loading ? (isEditing ? "Saving..." : "Creating...") : (isEditing ? "Save Changes" : "Create Misc")}
         </Button>
       </div>
