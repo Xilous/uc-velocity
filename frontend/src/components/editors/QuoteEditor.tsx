@@ -42,7 +42,7 @@ import type {
   LineItemType, Part, Labor, Miscellaneous, DiscountCode, QuoteStatus,
   StagedFulfillment, InvoiceCreate
 } from "@/types"
-import { Plus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info } from "lucide-react"
+import { Plus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info, Copy } from "lucide-react"
 import { QuoteAuditTrail } from "./QuoteAuditTrail"
 import { PartForm } from "@/components/forms/PartForm"
 import { LaborForm } from "@/components/forms/LaborForm"
@@ -52,9 +52,10 @@ import { DiscountCodeForm } from "@/components/forms/DiscountCodeForm"
 interface QuoteEditorProps {
   quoteId: number
   onUpdate?: () => void
+  onSelectQuote?: (quoteId: number) => void
 }
 
-export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
+export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorProps) {
   const [quote, setQuote] = useState<Quote | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -124,6 +125,9 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
   const [discountAllSection, setDiscountAllSection] = useState<LineItemType | null>(null)
   const [selectedBulkDiscountCodeId, setSelectedBulkDiscountCodeId] = useState<string>("")
   const [applyingDiscount, setApplyingDiscount] = useState(false)
+
+  // Clone quote state
+  const [isCloning, setIsCloning] = useState(false)
 
   const fetchQuote = async () => {
     setLoading(true)
@@ -756,6 +760,26 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
     }
   }
 
+  // Clone quote handler
+  const handleCloneQuote = async () => {
+    if (!quote) return
+
+    setIsCloning(true)
+    try {
+      const clonedQuote = await api.quotes.clone(quote.id)
+      onUpdate?.()
+      if (onSelectQuote) {
+        onSelectQuote(clonedQuote.id)
+      } else {
+        alert(`Quote cloned successfully! New Quote #${clonedQuote.id}`)
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to clone quote")
+    } finally {
+      setIsCloning(false)
+    }
+  }
+
   if (loading) {
     return <div className="p-8 text-center text-muted-foreground">Loading...</div>
   }
@@ -941,6 +965,16 @@ export function QuoteEditor({ quoteId, onUpdate }: QuoteEditorProps) {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCloneQuote}
+            disabled={isCloning}
+            className="gap-2"
+          >
+            <Copy className="h-4 w-4" />
+            {isCloning ? "Cloning..." : "Clone Quote"}
+          </Button>
           <Select value={quote.status} onValueChange={(v) => handleStatusChange(v as QuoteStatus)}>
             <SelectTrigger className="w-32">
               <SelectValue />

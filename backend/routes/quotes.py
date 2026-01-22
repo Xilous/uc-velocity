@@ -252,6 +252,77 @@ def delete_quote(quote_id: int, db: Session = Depends(get_db)):
     return {"message": "Quote deleted successfully"}
 
 
+@router.post("/{quote_id}/clone", response_model=QuoteSchema)
+def clone_quote(quote_id: int, db: Session = Depends(get_db)):
+    """
+    Clone a quote and all its line items.
+
+    Creates an exact copy of the quote with:
+    - Status reset to "Active"
+    - Fulfillment quantities reset (qty_fulfilled=0, qty_pending=quantity)
+    - Markup control disabled
+    - Same project, client_po_number, and work_description
+    """
+    # Fetch the source quote with all line items
+    source_quote = (
+        db.query(Quote)
+        .options(joinedload(Quote.line_items))
+        .filter(Quote.id == quote_id)
+        .first()
+    )
+    if not source_quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+
+    # Create new quote with copied fields
+    new_quote = Quote(
+        project_id=source_quote.project_id,
+        status="Active",  # Always reset to Active
+        client_po_number=source_quote.client_po_number,
+        work_description=source_quote.work_description,
+        markup_control_enabled=False,  # Reset to disabled
+        global_markup_percent=None,  # Reset to None
+    )
+    db.add(new_quote)
+    db.flush()  # Get new quote ID
+
+    # Clone all line items
+    for item in source_quote.line_items:
+        new_item = QuoteLineItem(
+            quote_id=new_quote.id,
+            item_type=item.item_type,
+            labor_id=item.labor_id,
+            part_id=item.part_id,
+            misc_id=item.misc_id,
+            discount_code_id=item.discount_code_id,
+            description=item.description,
+            quantity=item.quantity,
+            unit_price=item.unit_price,
+            qty_pending=item.quantity,  # Reset: pending = quantity
+            qty_fulfilled=0.0,  # Reset: fulfilled = 0
+            is_pms=item.is_pms,
+            pms_percent=item.pms_percent,
+            original_markup_percent=item.original_markup_percent,
+            base_cost=item.base_cost,
+        )
+        db.add(new_item)
+
+    db.commit()
+
+    # Return the new quote with all relationships loaded
+    new_quote = (
+        db.query(Quote)
+        .options(
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.labor),
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.part),
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous),
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code)
+        )
+        .filter(Quote.id == new_quote.id)
+        .first()
+    )
+    return new_quote
+
+
 # ==================== Markup Discount Control ====================
 
 @router.post("/{quote_id}/markup-control", response_model=MarkupControlToggleResponse)

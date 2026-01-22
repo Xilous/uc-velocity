@@ -162,6 +162,10 @@ export const api = {
     // Markup Control
     toggleMarkupControl: (quoteId: number, data: MarkupControlToggleRequest) =>
       request<MarkupControlToggleResponse>(`/quotes/${quoteId}/markup-control`, { method: 'POST', body: JSON.stringify(data) }),
+
+    // Clone
+    clone: (quoteId: number) =>
+      request<Quote>(`/quotes/${quoteId}/clone`, { method: 'POST' }),
   },
 
   // ===== Invoices =====
