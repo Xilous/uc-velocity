@@ -13,6 +13,16 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -43,7 +53,7 @@ import type {
   LineItemType, Part, Labor, Miscellaneous, DiscountCode, QuoteStatus,
   StagedFulfillment, InvoiceCreate
 } from "@/types"
-import { Plus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info, Copy, Car, MapPin } from "lucide-react"
+import { Plus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info, Copy, Car, MapPin, X } from "lucide-react"
 import { QuoteAuditTrail } from "./QuoteAuditTrail"
 import { PartForm } from "@/components/forms/PartForm"
 import { LaborForm } from "@/components/forms/LaborForm"
@@ -90,13 +100,23 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   const [editQuantity, setEditQuantity] = useState("1")
   const [editDiscountCodeId, setEditDiscountCodeId] = useState<string>("")
 
-  // Fulfill dialog states
-  const [fulfillDialogOpen, setFulfillDialogOpen] = useState(false)
-  const [fulfillLineItem, setFulfillLineItem] = useState<QuoteLineItem | null>(null)
-  const [fulfillQuantity, setFulfillQuantity] = useState("")
-
   // Staged fulfillments (session only - not persisted until invoice created)
   const [stagedFulfillments, setStagedFulfillments] = useState<Map<number, number>>(new Map())
+
+  // Inline editing state for staging
+  const [editingLineItemId, setEditingLineItemId] = useState<number | null>(null)
+  const [editingValue, setEditingValue] = useState<string>("")
+
+  // Bulk stage by percentage dialog
+  const [bulkStageDialogOpen, setBulkStageDialogOpen] = useState(false)
+  const [bulkStageSection, setBulkStageSection] = useState<LineItemType | null>(null)
+  const [bulkStagePercent, setBulkStagePercent] = useState<string>("50")
+
+  // Invoice preview modal
+  const [previewModalOpen, setPreviewModalOpen] = useState(false)
+
+  // Confirmation dialog before invoice creation
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
 
   // Creating invoice
   const [isCreatingInvoice, setIsCreatingInvoice] = useState(false)
@@ -641,6 +661,49 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     }
   }
 
+  // Calculate staged total for a single line item
+  const getStagedLineItemTotal = (item: QuoteLineItem): number => {
+    const stagedQty = stagedFulfillments.get(item.id) || 0
+    if (stagedQty === 0) return 0
+    const unitPrice = getEffectiveUnitPrice(item)
+    let total = unitPrice * stagedQty
+    if (item.discount_code) {
+      total = total * (1 - item.discount_code.discount_percent / 100)
+    }
+    return total
+  }
+
+  // Calculate staged totals for a section
+  const calculateStagedSectionTotals = (items: QuoteLineItem[]) => {
+    return {
+      stagedQty: items.reduce((sum, item) => sum + (stagedFulfillments.get(item.id) || 0), 0),
+      stagedTotal: items.reduce((sum, item) => sum + getStagedLineItemTotal(item), 0),
+      itemCount: items.filter(item => stagedFulfillments.has(item.id)).length
+    }
+  }
+
+  // Calculate quote-wide staged totals
+  const calculateStagedGrandTotal = () => {
+    if (!quote) return { stagedQty: 0, stagedTotal: 0, itemCount: 0 }
+    return calculateStagedSectionTotals(quote.line_items)
+  }
+
+  // Calculate already invoiced totals
+  const calculateInvoicedTotals = () => {
+    if (!quote) return { invoicedQty: 0, invoicedTotal: 0 }
+    return {
+      invoicedQty: quote.line_items.reduce((sum, item) => sum + item.qty_fulfilled, 0),
+      invoicedTotal: quote.line_items.reduce((sum, item) => {
+        const unitPrice = getEffectiveUnitPrice(item)
+        let total = unitPrice * item.qty_fulfilled
+        if (item.discount_code) {
+          total = total * (1 - item.discount_code.discount_percent / 100)
+        }
+        return sum + total
+      }, 0)
+    }
+  }
+
   // Round up to nearest 8
   const roundUpToNearest8 = (value: number): number => {
     return Math.ceil(value / 8) * 8
@@ -797,34 +860,73 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   const laborItems2 = quote?.line_items.filter(item => item.item_type === "labor") || []
   const miscItems2 = quote?.line_items.filter(item => item.item_type === "misc") || []
 
-  // Fulfill dialog handlers
-  const openFulfillDialog = (item: QuoteLineItem) => {
-    setFulfillLineItem(item)
-    // Pre-fill with staged value if exists, otherwise empty
-    const staged = stagedFulfillments.get(item.id)
-    setFulfillQuantity(staged?.toString() || "")
-    setFulfillDialogOpen(true)
+  // Stacked progress bar component for fulfillment visualization
+  const StackedProgress = ({ items }: { items: QuoteLineItem[] }) => {
+    const totals = calculateSectionTotals(items)
+    const stagedTotals = calculateStagedSectionTotals(items)
+
+    if (totals.qtyOrdered === 0) return null
+
+    const fulfilledPercent = (totals.qtyFulfilled / totals.qtyOrdered) * 100
+    const stagedPercent = (stagedTotals.stagedQty / totals.qtyOrdered) * 100
+
+    return (
+      <div className="h-2 w-32 bg-muted rounded-full overflow-hidden flex" title={`Fulfilled: ${totals.qtyFulfilled}, Staged: ${stagedTotals.stagedQty}, Remaining: ${totals.qtyPending - stagedTotals.stagedQty}`}>
+        {/* Fulfilled portion - solid green */}
+        <div
+          className="h-full bg-green-600 dark:bg-green-500"
+          style={{ width: `${fulfilledPercent}%` }}
+        />
+        {/* Staged portion - lighter green */}
+        <div
+          className="h-full bg-green-300 dark:bg-green-700"
+          style={{ width: `${stagedPercent}%` }}
+        />
+      </div>
+    )
   }
 
-  const handleStageFulfillment = () => {
-    if (!fulfillLineItem) return
-    const qty = parseFloat(fulfillQuantity)
+  // Inline editing handlers for staging
+  const startEditing = (item: QuoteLineItem) => {
+    if (item.qty_pending === 0) return // Can't edit fully fulfilled items
+    setEditingLineItemId(item.id)
+    // Pre-fill with staged value if exists, otherwise empty
+    const staged = stagedFulfillments.get(item.id)
+    setEditingValue(staged?.toString() || "")
+  }
+
+  const handleInlineEditComplete = (item: QuoteLineItem) => {
+    const qty = parseFloat(editingValue)
+    const newStaged = new Map(stagedFulfillments)
+
     if (isNaN(qty) || qty <= 0) {
       // Remove staged fulfillment if invalid or zero
-      const newStaged = new Map(stagedFulfillments)
-      newStaged.delete(fulfillLineItem.id)
-      setStagedFulfillments(newStaged)
-    } else if (qty > fulfillLineItem.qty_pending) {
-      alert(`Cannot fulfill more than ${fulfillLineItem.qty_pending} (pending quantity)`)
-      return
+      newStaged.delete(item.id)
+    } else if (qty > item.qty_pending) {
+      // Cap at max pending
+      newStaged.set(item.id, item.qty_pending)
     } else {
-      const newStaged = new Map(stagedFulfillments)
-      newStaged.set(fulfillLineItem.id, qty)
-      setStagedFulfillments(newStaged)
+      newStaged.set(item.id, qty)
     }
-    setFulfillDialogOpen(false)
-    setFulfillLineItem(null)
-    setFulfillQuantity("")
+
+    setStagedFulfillments(newStaged)
+    setEditingLineItemId(null)
+    setEditingValue("")
+  }
+
+  const handleInlineEditCancel = () => {
+    setEditingLineItemId(null)
+    setEditingValue("")
+  }
+
+  const handleInlineEditKeyDown = (e: React.KeyboardEvent, item: QuoteLineItem) => {
+    if (e.key === "Enter") {
+      e.preventDefault()
+      handleInlineEditComplete(item)
+    } else if (e.key === "Escape") {
+      e.preventDefault()
+      handleInlineEditCancel()
+    }
   }
 
   const clearStagedFulfillment = (itemId: number) => {
@@ -841,6 +943,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     if (stagedFulfillments.size === 0) return
 
     setIsCreatingInvoice(true)
+    setConfirmDialogOpen(false) // Close confirmation dialog
     try {
       const fulfillments = Array.from(stagedFulfillments.entries()).map(([lineItemId, qty]) => ({
         line_item_id: lineItemId,
@@ -881,6 +984,60 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     })
 
     setStagedFulfillments(newStagedFulfillments)
+  }
+
+  // Clear All Staged handler - clears all staged items in section
+  const handleClearAllStaged = (itemType: LineItemType) => {
+    if (!quote) return
+
+    const newStaged = new Map(stagedFulfillments)
+    quote.line_items
+      .filter(item => item.item_type === itemType)
+      .forEach(item => newStaged.delete(item.id))
+
+    setStagedFulfillments(newStaged)
+  }
+
+  // Get button state for a section (fulfill, clear, or disabled)
+  const getSectionButtonState = (items: QuoteLineItem[]): 'fulfill' | 'clear' | 'disabled' => {
+    const pendingItems = items.filter(item => item.qty_pending > 0)
+    if (pendingItems.length === 0) return 'disabled' // Nothing to stage
+
+    const allFullyStaged = pendingItems.every(item => {
+      const staged = stagedFulfillments.get(item.id)
+      return staged === item.qty_pending
+    })
+
+    return allFullyStaged ? 'clear' : 'fulfill'
+  }
+
+  // Open bulk stage dialog for a section
+  const handleOpenBulkStageDialog = (itemType: LineItemType) => {
+    setBulkStageSection(itemType)
+    setBulkStagePercent("50")
+    setBulkStageDialogOpen(true)
+  }
+
+  // Apply bulk stage by percentage
+  const handleBulkStageByPercent = () => {
+    if (!quote || !bulkStageSection) return
+
+    const percent = parseFloat(bulkStagePercent) / 100
+    if (isNaN(percent) || percent <= 0 || percent > 1) return
+
+    const newStaged = new Map(stagedFulfillments)
+
+    quote.line_items
+      .filter(item => item.item_type === bulkStageSection && item.qty_pending > 0)
+      .forEach(item => {
+        const stageQty = Math.round(item.qty_pending * percent * 100) / 100 // 2 decimal places
+        if (stageQty > 0) {
+          newStaged.set(item.id, stageQty)
+        }
+      })
+
+    setStagedFulfillments(newStaged)
+    setBulkStageDialogOpen(false)
   }
 
   // Discount All handlers
@@ -964,19 +1121,44 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     <Card>
       <CardHeader className="pb-3">
         <div className="flex justify-between items-center">
-          <CardTitle className="text-base flex items-center gap-2">
-            {icon}
-            {title}
-          </CardTitle>
+          <div className="flex items-center gap-4">
+            <CardTitle className="text-base flex items-center gap-2">
+              {icon}
+              {title}
+            </CardTitle>
+            {items.length > 0 && <StackedProgress items={items} />}
+          </div>
           <div className="flex gap-2">
+            {getSectionButtonState(items) === 'clear' ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleClearAllStaged(type)}
+                className="text-green-600 dark:text-green-400 border-green-300 dark:border-green-700 hover:bg-green-50 dark:hover:bg-green-950"
+              >
+                <X className="h-4 w-4 mr-1" />
+                Clear All Staged
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleFulfillAll(type)}
+                disabled={getSectionButtonState(items) === 'disabled'}
+              >
+                <ClipboardCheck className="h-4 w-4 mr-1" />
+                Fulfill All
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
-              onClick={() => handleFulfillAll(type)}
+              onClick={() => handleOpenBulkStageDialog(type)}
               disabled={!items.some(item => item.qty_pending > 0)}
+              title="Stage percentage of pending quantities"
             >
-              <ClipboardCheck className="h-4 w-4 mr-1" />
-              Fulfill All
+              <Percent className="h-4 w-4 mr-1" />
+              Stage %
             </Button>
             <Button
               variant="outline"
@@ -1023,7 +1205,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               {items.map((item) => {
                 const staged = stagedFulfillments.get(item.id)
                 return (
-                  <TableRow key={item.id} className={staged ? "bg-green-50" : undefined}>
+                  <TableRow key={item.id} className={`${staged ? "border-l-4 border-l-green-500 dark:border-l-green-400" : ""} ${item.qty_pending === 0 ? "opacity-50" : ""}`}>
                     <TableCell>
                       <div>
                         <span className="font-medium">{getLineItemDescription(item)}</span>
@@ -1031,7 +1213,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                           <span className="text-muted-foreground ml-2">- {item.part.description}</span>
                         )}
                         {staged && (
-                          <Badge variant="outline" className="ml-2 bg-green-100 text-green-700 border-green-300">
+                          <Badge variant="outline" className="ml-2 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 border-green-300 dark:border-green-700">
                             Staged: {staged}
                           </Badge>
                         )}
@@ -1039,12 +1221,38 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     </TableCell>
                     <TableCell className="text-right">{item.quantity}</TableCell>
                     <TableCell className="text-right">
-                      <span className={item.qty_pending === 0 ? "text-muted-foreground" : ""}>
-                        {item.qty_pending}
-                      </span>
+                      {editingLineItemId === item.id ? (
+                        <Input
+                          type="number"
+                          step="1"
+                          min="0"
+                          max={item.qty_pending}
+                          value={editingValue}
+                          onChange={(e) => setEditingValue(e.target.value)}
+                          onBlur={() => handleInlineEditComplete(item)}
+                          onKeyDown={(e) => handleInlineEditKeyDown(e, item)}
+                          className="w-20 h-8 text-right"
+                          autoFocus
+                        />
+                      ) : (
+                        <button
+                          onClick={() => startEditing(item)}
+                          disabled={item.qty_pending === 0}
+                          className={`px-2 py-1 rounded transition-colors ${
+                            item.qty_pending === 0
+                              ? "text-muted-foreground cursor-not-allowed"
+                              : staged
+                              ? "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-800"
+                              : "hover:bg-muted cursor-pointer"
+                          }`}
+                          title={item.qty_pending > 0 ? "Click to stage for fulfillment" : "Fully fulfilled"}
+                        >
+                          {item.qty_pending}
+                        </button>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <span className={item.qty_fulfilled > 0 ? "text-green-600 font-medium" : "text-muted-foreground"}>
+                      <span className={item.qty_fulfilled > 0 ? "text-green-600 dark:text-green-400 font-medium" : "text-muted-foreground"}>
                         {item.qty_fulfilled}
                       </span>
                     </TableCell>
@@ -1067,7 +1275,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                           <span className="line-through text-muted-foreground text-sm">
                             ${getLineItemSubtotal(item).toFixed(2)}
                           </span>
-                          <span className="ml-2 font-medium text-green-600">
+                          <span className="ml-2 font-medium text-green-600 dark:text-green-400">
                             ${getLineItemTotal(item).toFixed(2)}
                           </span>
                         </div>
@@ -1084,16 +1292,17 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openFulfillDialog(item)}
-                        disabled={item.qty_pending === 0}
-                        title="Fulfill"
-                        className={staged ? "text-green-600" : "text-blue-600"}
-                      >
-                        <ClipboardCheck className="h-4 w-4" />
-                      </Button>
+                      {staged && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => clearStagedFulfillment(item.id)}
+                          title="Clear staged"
+                          className="text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"
@@ -1120,6 +1329,24 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                   <TableCell className="text-right font-bold">${calculateSectionTotals(items).total.toFixed(2)}</TableCell>
                   <TableCell></TableCell>
                 </TableRow>
+                {calculateStagedSectionTotals(items).itemCount > 0 && (
+                  <TableRow className="bg-green-50/50 dark:bg-green-950/50 border-t-2 border-green-200 dark:border-green-800">
+                    <TableCell className="font-semibold text-green-700 dark:text-green-300">
+                      Staging for Invoice
+                    </TableCell>
+                    <TableCell></TableCell>
+                    <TableCell className="text-right font-semibold text-green-700 dark:text-green-300">
+                      {calculateStagedSectionTotals(items).stagedQty}
+                    </TableCell>
+                    <TableCell></TableCell>
+                    <TableCell></TableCell>
+                    <TableCell></TableCell>
+                    <TableCell className="text-right font-bold text-green-700 dark:text-green-300">
+                      ${calculateStagedSectionTotals(items).stagedTotal.toFixed(2)}
+                    </TableCell>
+                    <TableCell></TableCell>
+                  </TableRow>
+                )}
               </TableFooter>
             )}
           </Table>
@@ -1278,7 +1505,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
             </CardTitle>
             <div className="flex items-center gap-3">
               {quote.markup_control_enabled && quote.global_markup_percent !== null && (
-                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-300">
+                <Badge variant="outline" className="bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700">
                   Global Markup: {quote.global_markup_percent}%
                 </Badge>
               )}
@@ -1309,19 +1536,44 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       <Card>
         <CardHeader className="pb-3">
           <div className="flex justify-between items-center">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Wrench className="h-4 w-4" />
-              Labour
-            </CardTitle>
+            <div className="flex items-center gap-4">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Wrench className="h-4 w-4" />
+                Labour
+              </CardTitle>
+              {laborItems2.length > 0 && <StackedProgress items={laborItems2} />}
+            </div>
             <div className="flex gap-2">
+              {getSectionButtonState(laborItems2) === 'clear' ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleClearAllStaged("labor")}
+                  className="text-green-600 dark:text-green-400 border-green-300 dark:border-green-700 hover:bg-green-50 dark:hover:bg-green-950"
+                >
+                  <X className="h-4 w-4 mr-1" />
+                  Clear All Staged
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleFulfillAll("labor")}
+                  disabled={getSectionButtonState(laborItems2) === 'disabled'}
+                >
+                  <ClipboardCheck className="h-4 w-4 mr-1" />
+                  Fulfill All
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => handleFulfillAll("labor")}
+                onClick={() => handleOpenBulkStageDialog("labor")}
                 disabled={!laborItems2.some(item => item.qty_pending > 0)}
+                title="Stage percentage of pending quantities"
               >
-                <ClipboardCheck className="h-4 w-4 mr-1" />
-                Fulfill All
+                <Percent className="h-4 w-4 mr-1" />
+                Stage %
               </Button>
               <Button
                 variant="outline"
@@ -1390,7 +1642,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     ? effectiveSubtotal * (1 - item.discount_code.discount_percent / 100)
                     : effectiveSubtotal
                   return (
-                    <TableRow key={item.id} className={staged ? "bg-green-50" : undefined}>
+                    <TableRow key={item.id} className={`${staged ? "border-l-4 border-l-green-500 dark:border-l-green-400" : ""} ${item.qty_pending === 0 ? "opacity-50" : ""}`}>
                       <TableCell>
                         <div>
                           <span className="font-medium">{getLineItemDescription(item)}</span>
@@ -1398,7 +1650,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                             <span className="text-xs text-muted-foreground ml-1">({item.pms_percent}%)</span>
                           )}
                           {staged && (
-                            <Badge variant="outline" className="ml-2 bg-green-100 text-green-700 border-green-300">
+                            <Badge variant="outline" className="ml-2 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 border-green-300 dark:border-green-700">
                               Staged: {staged}
                             </Badge>
                           )}
@@ -1406,12 +1658,38 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       </TableCell>
                       <TableCell className="text-right">{item.quantity}</TableCell>
                       <TableCell className="text-right">
-                        <span className={item.qty_pending === 0 ? "text-muted-foreground" : ""}>
-                          {item.qty_pending}
-                        </span>
+                        {editingLineItemId === item.id ? (
+                          <Input
+                            type="number"
+                            step="1"
+                            min="0"
+                            max={item.qty_pending}
+                            value={editingValue}
+                            onChange={(e) => setEditingValue(e.target.value)}
+                            onBlur={() => handleInlineEditComplete(item)}
+                            onKeyDown={(e) => handleInlineEditKeyDown(e, item)}
+                            className="w-20 h-8 text-right"
+                            autoFocus
+                          />
+                        ) : (
+                          <button
+                            onClick={() => startEditing(item)}
+                            disabled={item.qty_pending === 0}
+                            className={`px-2 py-1 rounded transition-colors ${
+                              item.qty_pending === 0
+                                ? "text-muted-foreground cursor-not-allowed"
+                                : staged
+                                ? "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-800"
+                                : "hover:bg-muted cursor-pointer"
+                            }`}
+                            title={item.qty_pending > 0 ? "Click to stage for fulfillment" : "Fully fulfilled"}
+                          >
+                            {item.qty_pending}
+                          </button>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <span className={item.qty_fulfilled > 0 ? "text-green-600 font-medium" : "text-muted-foreground"}>
+                        <span className={item.qty_fulfilled > 0 ? "text-green-600 dark:text-green-400 font-medium" : "text-muted-foreground"}>
                           {item.qty_fulfilled}
                         </span>
                       </TableCell>
@@ -1434,7 +1712,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                             <span className="line-through text-muted-foreground text-sm">
                               ${effectiveSubtotal.toFixed(2)}
                             </span>
-                            <span className="ml-2 font-medium text-green-600">
+                            <span className="ml-2 font-medium text-green-600 dark:text-green-400">
                               ${effectiveTotal.toFixed(2)}
                             </span>
                           </div>
@@ -1451,16 +1729,17 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openFulfillDialog(item)}
-                          disabled={item.qty_pending === 0}
-                          title="Fulfill"
-                          className={staged ? "text-green-600" : "text-blue-600"}
-                        >
-                          <ClipboardCheck className="h-4 w-4" />
-                        </Button>
+                        {staged && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => clearStagedFulfillment(item.id)}
+                            title="Clear staged"
+                            className="text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -1487,6 +1766,24 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     <TableCell className="text-right font-bold">${calculateSectionTotals(laborItems2, true).total.toFixed(2)}</TableCell>
                     <TableCell></TableCell>
                   </TableRow>
+                  {calculateStagedSectionTotals(laborItems2).itemCount > 0 && (
+                    <TableRow className="bg-green-50/50 dark:bg-green-950/50 border-t-2 border-green-200 dark:border-green-800">
+                      <TableCell className="font-semibold text-green-700 dark:text-green-300">
+                        Staging for Invoice
+                      </TableCell>
+                      <TableCell></TableCell>
+                      <TableCell className="text-right font-semibold text-green-700 dark:text-green-300">
+                        {calculateStagedSectionTotals(laborItems2).stagedQty}
+                      </TableCell>
+                      <TableCell></TableCell>
+                      <TableCell></TableCell>
+                      <TableCell></TableCell>
+                      <TableCell className="text-right font-bold text-green-700 dark:text-green-300">
+                        ${calculateStagedSectionTotals(laborItems2).stagedTotal.toFixed(2)}
+                      </TableCell>
+                      <TableCell></TableCell>
+                    </TableRow>
+                  )}
                 </TableFooter>
               )}
             </Table>
@@ -1590,23 +1887,88 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         }}
       />
 
+      {/* Floating Staging Summary Card */}
+      {stagedFulfillments.size > 0 && (
+        <Card className="fixed bottom-24 right-6 w-80 shadow-lg border-green-200 dark:border-green-800 bg-card z-50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <ClipboardCheck className="h-4 w-4 text-green-600 dark:text-green-400" />
+              Staging Summary
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {/* Per-section breakdown */}
+            {calculateStagedSectionTotals(partItems).itemCount > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">
+                  Parts ({calculateStagedSectionTotals(partItems).itemCount} items)
+                </span>
+                <span className="font-medium">
+                  ${calculateStagedSectionTotals(partItems).stagedTotal.toFixed(2)}
+                </span>
+              </div>
+            )}
+            {calculateStagedSectionTotals(laborItems2).itemCount > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">
+                  Labour ({calculateStagedSectionTotals(laborItems2).itemCount} items)
+                </span>
+                <span className="font-medium">
+                  ${calculateStagedSectionTotals(laborItems2).stagedTotal.toFixed(2)}
+                </span>
+              </div>
+            )}
+            {calculateStagedSectionTotals(miscItems2).itemCount > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">
+                  Misc ({calculateStagedSectionTotals(miscItems2).itemCount} items)
+                </span>
+                <span className="font-medium">
+                  ${calculateStagedSectionTotals(miscItems2).stagedTotal.toFixed(2)}
+                </span>
+              </div>
+            )}
+            <Separator />
+            <div className="flex justify-between font-bold">
+              <span>Total Staging</span>
+              <span className="text-green-600 dark:text-green-400">
+                ${calculateStagedGrandTotal().stagedTotal.toFixed(2)}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Floating Invoice Button */}
       <div className="fixed bottom-6 right-6 z-50">
         <div className="flex flex-col items-end gap-2">
           {!quote.client_po_number && stagedCount > 0 && (
-            <span className="text-sm text-amber-600 bg-amber-50 px-3 py-1 rounded-md shadow-sm">
+            <span className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-950 dark:text-amber-400 px-3 py-1 rounded-md shadow-sm">
               Client PO Number required
             </span>
           )}
-          <Button
-            size="lg"
-            onClick={handleCreateInvoice}
-            disabled={stagedCount === 0 || isCreatingInvoice || !quote.client_po_number}
-            className="shadow-lg gap-2"
-          >
-            <Receipt className="h-5 w-5" />
-            {isCreatingInvoice ? "Creating..." : `Create Invoice${stagedCount > 0 ? ` (${stagedCount} items)` : ""}`}
-          </Button>
+          <div className="flex gap-2">
+            {stagedCount > 0 && (
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={() => setPreviewModalOpen(true)}
+                className="shadow-lg gap-2"
+              >
+                <FileText className="h-5 w-5" />
+                Preview
+              </Button>
+            )}
+            <Button
+              size="lg"
+              onClick={() => setConfirmDialogOpen(true)}
+              disabled={stagedCount === 0 || isCreatingInvoice || !quote.client_po_number}
+              className="shadow-lg gap-2"
+            >
+              <Receipt className="h-5 w-5" />
+              {isCreatingInvoice ? "Creating..." : `Create Invoice${stagedCount > 0 ? ` (${stagedCount} items)` : ""}`}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -1840,76 +2202,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         </DialogContent>
       </Dialog>
 
-      {/* Fulfill Dialog */}
-      <Dialog open={fulfillDialogOpen} onOpenChange={setFulfillDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ClipboardCheck className="h-5 w-5" />
-              Stage Fulfillment
-            </DialogTitle>
-            <DialogDescription>
-              Set the quantity to fulfill for this line item. This will be staged until you create an invoice.
-            </DialogDescription>
-          </DialogHeader>
-
-          {fulfillLineItem && (
-            <div className="space-y-4 pt-4">
-              <div className="bg-muted/50 p-3 rounded-md">
-                <p className="text-sm font-medium">{getDescriptionLabel(fulfillLineItem)}</p>
-                <p className="text-lg">{getLineItemDescription(fulfillLineItem)}</p>
-              </div>
-
-              <div className="grid grid-cols-3 gap-4 text-center">
-                <div className="bg-muted/30 p-3 rounded-md">
-                  <p className="text-xs text-muted-foreground">Qty Ordered</p>
-                  <p className="text-lg font-semibold">{fulfillLineItem.quantity}</p>
-                </div>
-                <div className="bg-muted/30 p-3 rounded-md">
-                  <p className="text-xs text-muted-foreground">Qty Pending</p>
-                  <p className="text-lg font-semibold">{fulfillLineItem.qty_pending}</p>
-                </div>
-                <div className="bg-green-50 p-3 rounded-md">
-                  <p className="text-xs text-green-600">Qty Fulfilled</p>
-                  <p className="text-lg font-semibold text-green-600">{fulfillLineItem.qty_fulfilled}</p>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Quantity to Fulfill (max: {fulfillLineItem.qty_pending})</Label>
-                <Input
-                  type="number"
-                  step="1"
-                  min="0"
-                  max={fulfillLineItem.qty_pending}
-                  value={fulfillQuantity}
-                  onChange={(e) => setFulfillQuantity(e.target.value)}
-                  placeholder="Enter quantity"
-                />
-              </div>
-
-              <div className="flex gap-2">
-                {stagedFulfillments.has(fulfillLineItem.id) && (
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      clearStagedFulfillment(fulfillLineItem.id)
-                      setFulfillDialogOpen(false)
-                    }}
-                    className="flex-1"
-                  >
-                    Clear Staged
-                  </Button>
-                )}
-                <Button onClick={handleStageFulfillment} className="flex-1">
-                  Stage Fulfillment
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
       {/* PMS (Project Management Services) Dialog */}
       <Dialog open={pmsDialogOpen} onOpenChange={setPmsDialogOpen}>
         <DialogContent>
@@ -1989,6 +2281,166 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                 disabled={togglingMarkupControl || !pendingMarkupPercent}
               >
                 {togglingMarkupControl ? "Applying..." : "Enable Markup Control"}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Invoice Creation Confirmation Dialog */}
+      <AlertDialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Create Invoice?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You are about to create an invoice for {stagedFulfillments.size} item{stagedFulfillments.size !== 1 ? 's' : ''} totaling{' '}
+              <span className="font-semibold text-green-600 dark:text-green-400">
+                ${calculateStagedGrandTotal().stagedTotal.toFixed(2)}
+              </span>.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleCreateInvoice}>
+              Create Invoice
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Invoice Preview Modal */}
+      <Dialog open={previewModalOpen} onOpenChange={setPreviewModalOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Invoice Preview
+            </DialogTitle>
+            <DialogDescription>
+              Review the staged items before creating the invoice.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Comparison Breakdown */}
+          <div className="grid grid-cols-4 gap-4 text-center">
+            <div className="p-4 bg-muted/30 rounded-lg">
+              <p className="text-xs text-muted-foreground">Quote Total</p>
+              <p className="text-xl font-bold">${calculateTotal().toFixed(2)}</p>
+            </div>
+            <div className="p-4 bg-blue-50 dark:bg-blue-950 rounded-lg">
+              <p className="text-xs text-blue-600 dark:text-blue-400">Already Invoiced</p>
+              <p className="text-xl font-bold text-blue-600 dark:text-blue-400">
+                ${calculateInvoicedTotals().invoicedTotal.toFixed(2)}
+              </p>
+            </div>
+            <div className="p-4 bg-green-50 dark:bg-green-950 rounded-lg border-2 border-green-300 dark:border-green-700">
+              <p className="text-xs text-green-600 dark:text-green-400">Staging Now</p>
+              <p className="text-xl font-bold text-green-600 dark:text-green-400">
+                ${calculateStagedGrandTotal().stagedTotal.toFixed(2)}
+              </p>
+            </div>
+            <div className="p-4 bg-orange-50 dark:bg-orange-950 rounded-lg">
+              <p className="text-xs text-orange-600 dark:text-orange-400">Remaining After</p>
+              <p className="text-xl font-bold text-orange-600 dark:text-orange-400">
+                ${(calculateTotal() - calculateInvoicedTotals().invoicedTotal - calculateStagedGrandTotal().stagedTotal).toFixed(2)}
+              </p>
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Staged Items List */}
+          <div className="max-h-64 overflow-y-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Item</TableHead>
+                  <TableHead className="text-right">Unit Price</TableHead>
+                  <TableHead className="text-right">Qty Staging</TableHead>
+                  <TableHead className="text-right">Total</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {quote?.line_items
+                  .filter(item => stagedFulfillments.has(item.id))
+                  .map(item => (
+                    <TableRow key={item.id}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={getTypeBadgeVariant(item.item_type)}>
+                            {item.item_type === "labor" ? "Labour" : item.item_type.charAt(0).toUpperCase() + item.item_type.slice(1)}
+                          </Badge>
+                          <span className="font-medium">{getLineItemDescription(item)}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">${getEffectiveUnitPrice(item).toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-medium text-green-600 dark:text-green-400">
+                        {stagedFulfillments.get(item.id)}
+                      </TableCell>
+                      <TableCell className="text-right font-medium">
+                        ${getStagedLineItemTotal(item).toFixed(2)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPreviewModalOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Stage by Percentage Dialog */}
+      <Dialog open={bulkStageDialogOpen} onOpenChange={setBulkStageDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Percent className="h-4 w-4" />
+              Stage by Percentage
+            </DialogTitle>
+            <DialogDescription>
+              Stage a percentage of pending quantities for all {bulkStageSection === "labor" ? "labour" : bulkStageSection} items.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label>Percentage of pending to stage</Label>
+              <div className="flex gap-2 items-center">
+                <Input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={bulkStagePercent}
+                  onChange={(e) => setBulkStagePercent(e.target.value)}
+                  className="w-24"
+                />
+                <span className="text-muted-foreground">%</span>
+              </div>
+            </div>
+            {/* Quick preset buttons */}
+            <div className="flex gap-2">
+              {[25, 50, 75, 100].map(pct => (
+                <Button
+                  key={pct}
+                  variant={bulkStagePercent === pct.toString() ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setBulkStagePercent(pct.toString())}
+                >
+                  {pct}%
+                </Button>
+              ))}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setBulkStageDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleBulkStageByPercent}>
+                Stage Items
               </Button>
             </DialogFooter>
           </div>
