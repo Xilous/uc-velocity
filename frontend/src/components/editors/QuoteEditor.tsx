@@ -141,6 +141,11 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   const [pendingMarkupPercent, setPendingMarkupPercent] = useState("")
   const [togglingMarkupControl, setTogglingMarkupControl] = useState(false)
 
+  // Edit Markup states (for modifying markup while enabled)
+  const [editMarkupDialogOpen, setEditMarkupDialogOpen] = useState(false)
+  const [editingMarkupPercent, setEditingMarkupPercent] = useState("")
+  const [updatingMarkupPercent, setUpdatingMarkupPercent] = useState(false)
+
   // Discount All dialog state
   const [discountAllDialogOpen, setDiscountAllDialogOpen] = useState(false)
   const [discountAllSection, setDiscountAllSection] = useState<LineItemType | null>(null)
@@ -441,6 +446,36 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       alert(err instanceof Error ? err.message : "Failed to enable markup control")
     } finally {
       setTogglingMarkupControl(false)
+    }
+  }
+
+  // Edit Markup handlers (for modifying markup while enabled)
+  const handleOpenEditMarkup = () => {
+    if (!quote || !quote.markup_control_enabled) return
+    setEditingMarkupPercent(quote.global_markup_percent?.toString() || "")
+    setEditMarkupDialogOpen(true)
+  }
+
+  const handleConfirmUpdateMarkup = async () => {
+    const percent = parseFloat(editingMarkupPercent)
+    if (isNaN(percent) || percent < 0) {
+      alert("Please enter a valid markup percentage (0 or greater)")
+      return
+    }
+    setUpdatingMarkupPercent(true)
+    try {
+      await api.quotes.toggleMarkupControl(quoteId, {
+        enabled: true,
+        global_markup_percent: percent
+      })
+      setEditMarkupDialogOpen(false)
+      setEditingMarkupPercent("")
+      fetchQuote()
+      onUpdate?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update markup")
+    } finally {
+      setUpdatingMarkupPercent(false)
     }
   }
 
@@ -1537,9 +1572,14 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
             </CardTitle>
             <div className="flex items-center gap-3">
               {quote.markup_control_enabled && quote.global_markup_percent !== null && (
-                <Badge variant="outline" className="bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700">
+                <button
+                  onClick={handleOpenEditMarkup}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors cursor-pointer"
+                  title="Click to edit global markup"
+                >
                   Global Markup: {quote.global_markup_percent}%
-                </Badge>
+                  <Pencil className="h-3 w-3" />
+                </button>
               )}
               <Button
                 size="sm"
@@ -2333,6 +2373,45 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                 disabled={togglingMarkupControl || !pendingMarkupPercent}
               >
                 {togglingMarkupControl ? "Applying..." : "Enable Markup Control"}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Markup Percent Dialog */}
+      <Dialog open={editMarkupDialogOpen} onOpenChange={setEditMarkupDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-4 w-4" />
+              Edit Global Markup
+            </DialogTitle>
+            <DialogDescription>
+              Update the global markup percentage. All line items (excluding PMS) will be recalculated.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label>Global Markup Percentage (%)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={editingMarkupPercent}
+                onChange={(e) => setEditingMarkupPercent(e.target.value)}
+                placeholder="e.g., 15.00"
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditMarkupDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleConfirmUpdateMarkup}
+                disabled={updatingMarkupPercent || !editingMarkupPercent}
+              >
+                {updatingMarkupPercent ? "Updating..." : "Update Markup"}
               </Button>
             </DialogFooter>
           </div>

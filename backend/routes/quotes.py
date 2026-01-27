@@ -355,49 +355,73 @@ def toggle_markup_control(
         raise HTTPException(status_code=404, detail="Quote not found")
 
     if request.enabled:
-        # Validate: No discount codes applied
-        lines_with_discounts = [
-            item for item in quote.line_items
-            if item.discount_code_id is not None
-        ]
-        if lines_with_discounts:
-            raise HTTPException(
-                status_code=400,
-                detail="Remove discount codes first to enable this feature"
-            )
-
         if request.global_markup_percent is None:
             raise HTTPException(
                 status_code=400,
-                detail="global_markup_percent is required when enabling markup control"
+                detail="global_markup_percent is required when enabling or updating markup control"
             )
 
-        # Enable markup control
-        quote.markup_control_enabled = True
-        quote.global_markup_percent = request.global_markup_percent
+        if quote.markup_control_enabled:
+            # UPDATE MODE: Already enabled, just update the percent
+            old_percent = quote.global_markup_percent
+            quote.global_markup_percent = request.global_markup_percent
 
-        # Recalculate all line items
-        for item in quote.line_items:
-            if item.is_pms:
-                continue  # Skip PMS items - they are EXEMPT
+            # Recalculate using EXISTING base_cost (don't recalculate base_cost)
+            for item in quote.line_items:
+                if item.is_pms:
+                    continue  # Skip PMS items - they are EXEMPT
+                if item.base_cost is not None:
+                    item.unit_price = item.base_cost * (1 + request.global_markup_percent / 100)
 
-            # Store original markup and base cost
-            item.original_markup_percent = get_original_markup(item, db)
-            item.base_cost = calculate_base_cost(item, db)
+            # Create snapshot
+            create_snapshot(
+                db=db,
+                quote=quote,
+                action_type="edit",
+                action_description=f"Updated global markup from {old_percent}% to {request.global_markup_percent}%"
+            )
 
-            # Recalculate unit_price with global markup
-            if item.base_cost:
-                item.unit_price = item.base_cost * (1 + request.global_markup_percent / 100)
+            message = f"Global markup updated to {request.global_markup_percent}%"
 
-        # Create snapshot
-        create_snapshot(
-            db=db,
-            quote=quote,
-            action_type="edit",
-            action_description=f"Enabled Markup Discount Control ({request.global_markup_percent}%)"
-        )
+        else:
+            # ENABLE MODE: First time enabling
+            # Validate: No discount codes applied
+            lines_with_discounts = [
+                item for item in quote.line_items
+                if item.discount_code_id is not None
+            ]
+            if lines_with_discounts:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Remove discount codes first to enable this feature"
+                )
 
-        message = f"Markup Discount Control enabled with {request.global_markup_percent}% markup"
+            # Enable markup control
+            quote.markup_control_enabled = True
+            quote.global_markup_percent = request.global_markup_percent
+
+            # Recalculate all line items
+            for item in quote.line_items:
+                if item.is_pms:
+                    continue  # Skip PMS items - they are EXEMPT
+
+                # Store original markup and base cost
+                item.original_markup_percent = get_original_markup(item, db)
+                item.base_cost = calculate_base_cost(item, db)
+
+                # Recalculate unit_price with global markup
+                if item.base_cost:
+                    item.unit_price = item.base_cost * (1 + request.global_markup_percent / 100)
+
+            # Create snapshot
+            create_snapshot(
+                db=db,
+                quote=quote,
+                action_type="edit",
+                action_description=f"Enabled Markup Discount Control ({request.global_markup_percent}%)"
+            )
+
+            message = f"Markup Discount Control enabled with {request.global_markup_percent}% markup"
 
     else:
         # Disable markup control
