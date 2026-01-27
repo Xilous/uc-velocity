@@ -658,6 +658,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       qtyPending: items.reduce((sum, item) => sum + item.qty_pending, 0),
       qtyFulfilled: items.reduce((sum, item) => sum + item.qty_fulfilled, 0),
       total: items.reduce((sum, item) => sum + (useEffectiveTotal ? getEffectiveLineItemTotal(item) : getLineItemTotal(item)), 0),
+      fulfilledValue: items.reduce((sum, item) => sum + getFulfilledLineItemValue(item), 0),
     }
   }
 
@@ -667,6 +668,17 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     if (stagedQty === 0) return 0
     const unitPrice = getEffectiveUnitPrice(item)
     let total = unitPrice * stagedQty
+    if (item.discount_code) {
+      total = total * (1 - item.discount_code.discount_percent / 100)
+    }
+    return total
+  }
+
+  // Calculate fulfilled value for a single line item
+  const getFulfilledLineItemValue = (item: QuoteLineItem): number => {
+    if (item.qty_fulfilled === 0) return 0
+    const unitPrice = getEffectiveUnitPrice(item)
+    let total = unitPrice * item.qty_fulfilled
     if (item.discount_code) {
       total = total * (1 - item.discount_code.discount_percent / 100)
     }
@@ -1195,6 +1207,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                 <TableHead className="text-right">Qty Ordered</TableHead>
                 <TableHead className="text-right">Qty Pending</TableHead>
                 <TableHead className="text-right">Qty Fulfilled</TableHead>
+                <TableHead className="text-right">Fulfilled Price</TableHead>
                 <TableHead className="text-right">Unit Price</TableHead>
                 <TableHead className="text-center">Discount</TableHead>
                 <TableHead className="text-right">Total</TableHead>
@@ -1255,6 +1268,15 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       <span className={item.qty_fulfilled > 0 ? "text-green-600 dark:text-green-400 font-medium" : "text-muted-foreground"}>
                         {item.qty_fulfilled}
                       </span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {item.qty_fulfilled > 0 ? (
+                        <span className="text-green-600 dark:text-green-400 font-medium">
+                          ${getFulfilledLineItemValue(item).toFixed(2)}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       ${getLineItemUnitPrice(item).toFixed(2)}
@@ -1324,6 +1346,15 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                   <TableCell className="text-right font-semibold">{calculateSectionTotals(items).qtyOrdered}</TableCell>
                   <TableCell className="text-right font-semibold">{calculateSectionTotals(items).qtyPending}</TableCell>
                   <TableCell className="text-right font-semibold">{calculateSectionTotals(items).qtyFulfilled}</TableCell>
+                  <TableCell className="text-right font-semibold">
+                    {calculateSectionTotals(items).qtyFulfilled > 0 ? (
+                      <span className="text-green-600 dark:text-green-400">
+                        ${calculateSectionTotals(items).fulfilledValue.toFixed(2)}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">-</span>
+                    )}
+                  </TableCell>
                   <TableCell></TableCell>
                   <TableCell></TableCell>
                   <TableCell className="text-right font-bold">${calculateSectionTotals(items).total.toFixed(2)}</TableCell>
@@ -1338,6 +1369,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     <TableCell className="text-right font-semibold text-green-700 dark:text-green-300">
                       {calculateStagedSectionTotals(items).stagedQty}
                     </TableCell>
+                    <TableCell></TableCell>
                     <TableCell></TableCell>
                     <TableCell></TableCell>
                     <TableCell></TableCell>
@@ -1627,6 +1659,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                   <TableHead className="text-right">Qty Ordered</TableHead>
                   <TableHead className="text-right">Qty Pending</TableHead>
                   <TableHead className="text-right">Qty Fulfilled</TableHead>
+                  <TableHead className="text-right">Fulfilled Price</TableHead>
                   <TableHead className="text-right">Unit Price</TableHead>
                   <TableHead className="text-center">Discount</TableHead>
                   <TableHead className="text-right">Total</TableHead>
@@ -1692,6 +1725,15 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                         <span className={item.qty_fulfilled > 0 ? "text-green-600 dark:text-green-400 font-medium" : "text-muted-foreground"}>
                           {item.qty_fulfilled}
                         </span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {item.qty_fulfilled > 0 ? (
+                          <span className="text-green-600 dark:text-green-400 font-medium">
+                            ${getFulfilledLineItemValue(item).toFixed(2)}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         ${effectivePrice.toFixed(2)}
@@ -1761,6 +1803,15 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     <TableCell className="text-right font-semibold">{calculateSectionTotals(laborItems2, true).qtyOrdered}</TableCell>
                     <TableCell className="text-right font-semibold">{calculateSectionTotals(laborItems2, true).qtyPending}</TableCell>
                     <TableCell className="text-right font-semibold">{calculateSectionTotals(laborItems2, true).qtyFulfilled}</TableCell>
+                    <TableCell className="text-right font-semibold">
+                      {calculateSectionTotals(laborItems2, true).qtyFulfilled > 0 ? (
+                        <span className="text-green-600 dark:text-green-400">
+                          ${calculateSectionTotals(laborItems2, true).fulfilledValue.toFixed(2)}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </TableCell>
                     <TableCell></TableCell>
                     <TableCell></TableCell>
                     <TableCell className="text-right font-bold">${calculateSectionTotals(laborItems2, true).total.toFixed(2)}</TableCell>
@@ -1775,6 +1826,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       <TableCell className="text-right font-semibold text-green-700 dark:text-green-300">
                         {calculateStagedSectionTotals(laborItems2).stagedQty}
                       </TableCell>
+                      <TableCell></TableCell>
                       <TableCell></TableCell>
                       <TableCell></TableCell>
                       <TableCell></TableCell>

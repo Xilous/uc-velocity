@@ -75,3 +75,4 @@ tmpclaude-*
 
 # Claude Code settings and temporary files
 .claude/
+CLAUDE.md
