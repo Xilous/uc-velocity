@@ -46,7 +46,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { SearchableSelect, SearchableSelectOption } from "@/components/ui/searchable-select"
+import { SearchableSelect } from "@/components/ui/searchable-select"
+import type { SearchableSelectOption } from "@/components/ui/searchable-select"
 import { api } from "@/api/client"
 import type {
   Quote, QuoteLineItem, QuoteLineItemCreate, QuoteLineItemUpdate,

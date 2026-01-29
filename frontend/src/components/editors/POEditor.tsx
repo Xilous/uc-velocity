@@ -19,7 +19,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { SearchableSelect, SearchableSelectOption } from "@/components/ui/searchable-select"
+import { SearchableSelect } from "@/components/ui/searchable-select"
+import type { SearchableSelectOption } from "@/components/ui/searchable-select"
 import { api } from "@/api/client"
 import type { PurchaseOrder, POLineItem, POLineItemCreate, POLineItemType, Part } from "@/types"
 import { Plus, Trash2, Package, FileText, Building } from "lucide-react"

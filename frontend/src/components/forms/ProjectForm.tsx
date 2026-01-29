@@ -9,7 +9,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { SearchableSelect, SearchableSelectOption } from "@/components/ui/searchable-select"
+import { SearchableSelect } from "@/components/ui/searchable-select"
+import type { SearchableSelectOption } from "@/components/ui/searchable-select"
 import { api } from "@/api/client"
 import type { Profile, Project, ProjectCreate, Contact } from "@/types"
 import { ProfileForm } from "./ProfileForm"
