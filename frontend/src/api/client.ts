@@ -9,7 +9,8 @@ import type {
   Quote, QuoteCreate, QuoteUpdate, QuoteLineItem, QuoteLineItemCreate, QuoteLineItemUpdate,
   PurchaseOrder, PurchaseOrderCreate, POLineItem, POLineItemCreate,
   Invoice, InvoiceCreate, InvoiceStatusUpdate, QuoteSnapshot, RevertPreview,
-  MarkupControlToggleRequest, MarkupControlToggleResponse
+  MarkupControlToggleRequest, MarkupControlToggleResponse,
+  CommitEditsRequest, CommitEditsResponse
 } from '@/types';
 
 // API base URL - configurable via environment variable for production
@@ -170,6 +171,10 @@ export const api = {
     // Clone
     clone: (quoteId: number) =>
       request<Quote>(`/quotes/${quoteId}/clone`, { method: 'POST' }),
+
+    // Commit Edits (Edit Mode)
+    commitEdits: (quoteId: number, data: CommitEditsRequest) =>
+      request<CommitEditsResponse>(`/quotes/${quoteId}/commit`, { method: 'POST', body: JSON.stringify(data) }),
   },
 
   // ===== Invoices =====

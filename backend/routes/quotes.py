@@ -14,8 +14,9 @@ from schemas import (
     QuoteCreate, QuoteUpdate, Quote as QuoteSchema,
     QuoteLineItemCreate, QuoteLineItemUpdate, QuoteLineItem as QuoteLineItemSchema,
     QuoteSnapshot as QuoteSnapshotSchema,
-    Invoice as InvoiceSchema, InvoiceCreate, LineItemFulfillment,
-    RevertPreview, MarkupControlToggleRequest, MarkupControlToggleResponse
+    Invoice as InvoiceSchema, InvoiceCreate,
+    RevertPreview, MarkupControlToggleRequest, MarkupControlToggleResponse,
+    CommitEditsRequest, CommitEditsResponse
 )
 
 
@@ -138,6 +139,37 @@ def calculate_base_cost(item: QuoteLineItem, db: Session) -> float:
             return item.unit_price or 0
 
     return 0
+
+
+def check_quote_not_frozen(quote_id: int, db: Session) -> None:
+    """
+    Check if a quote has been invoiced (frozen) and raise 400 if so.
+
+    A quote is considered frozen once any fulfillment has occurred (qty_fulfilled > 0
+    on any line item). Frozen quotes can only be invoiced further, not edited.
+
+    Args:
+        quote_id: The quote ID to check
+        db: Database session
+
+    Raises:
+        HTTPException: 400 error if quote is frozen
+    """
+    # Check if any line item has been fulfilled
+    has_fulfillment = (
+        db.query(QuoteLineItem)
+        .filter(
+            QuoteLineItem.quote_id == quote_id,
+            QuoteLineItem.qty_fulfilled > 0
+        )
+        .first() is not None
+    )
+
+    if has_fulfillment:
+        raise HTTPException(
+            status_code=400,
+            detail="This quote has been invoiced and is now frozen. You can only create additional invoices, not modify line items."
+        )
 
 
 def get_original_markup(item: QuoteLineItem, db: Session) -> float:
@@ -447,6 +479,9 @@ def toggle_markup_control(
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
 
+    # Check if quote is frozen (has been invoiced)
+    check_quote_not_frozen(quote_id, db)
+
     if request.enabled:
         if request.global_markup_percent is None:
             raise HTTPException(
@@ -593,6 +628,9 @@ def add_quote_line(quote_id: int, line_data: QuoteLineItemCreate, db: Session = 
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
 
+    # Check if quote is frozen (has been invoiced)
+    check_quote_not_frozen(quote_id, db)
+
     # Validate item_type
     if line_data.item_type not in ["labor", "part", "misc"]:
         raise HTTPException(status_code=400, detail="item_type must be 'labor', 'part', or 'misc'")
@@ -713,6 +751,9 @@ def update_quote_line(
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
 
+    # Check if quote is frozen (has been invoiced)
+    check_quote_not_frozen(quote_id, db)
+
     db_line = (
         db.query(QuoteLineItem)
         .filter(QuoteLineItem.id == line_id, QuoteLineItem.quote_id == quote_id)
@@ -802,6 +843,9 @@ def delete_quote_line(quote_id: int, line_id: int, db: Session = Depends(get_db)
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
 
+    # Check if quote is frozen (has been invoiced)
+    check_quote_not_frozen(quote_id, db)
+
     db_line = (
         db.query(QuoteLineItem)
         .filter(QuoteLineItem.id == line_id, QuoteLineItem.quote_id == quote_id)
@@ -859,6 +903,277 @@ def delete_quote_line(quote_id: int, line_id: int, db: Session = Depends(get_db)
     db.delete(db_line)
     db.commit()
     return {"message": "Line item deleted successfully"}
+
+
+# ==================== Commit Edits (Edit Mode) ====================
+
+@router.post("/{quote_id}/commit", response_model=CommitEditsResponse)
+def commit_edits(
+    quote_id: int,
+    request: CommitEditsRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Commit staged edits to a quote in a single transaction.
+
+    This endpoint handles batch operations for the Edit Mode workflow:
+    - Adds: Create new line items
+    - Edits: Update existing line items (quantity, price, discount, etc.)
+    - Deletes: Remove line items
+
+    All changes are validated and applied atomically, then a single snapshot
+    is created to record all changes in the audit trail.
+
+    IMPORTANT: This endpoint is BLOCKED if quote has been invoiced (frozen).
+    """
+    # Get quote with relationships
+    quote = (
+        db.query(Quote)
+        .options(
+            joinedload(Quote.project),
+            joinedload(Quote.line_items)
+        )
+        .filter(Quote.id == quote_id)
+        .first()
+    )
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+
+    # Check if quote is frozen (has been invoiced)
+    check_quote_not_frozen(quote_id, db)
+
+    if not request.changes:
+        raise HTTPException(status_code=400, detail="No changes provided")
+
+    # Track descriptions for audit trail
+    change_descriptions = []
+    adds_count = 0
+    edits_count = 0
+    deletes_count = 0
+
+    # Process all changes
+    for change in request.changes:
+        if change.action == "add":
+            # Validate required fields for add
+            if not change.item_type:
+                raise HTTPException(status_code=400, detail="item_type required for add action")
+            if change.item_type not in ["labor", "part", "misc"]:
+                raise HTTPException(status_code=400, detail="item_type must be 'labor', 'part', or 'misc'")
+
+            # Validate references based on item_type
+            if change.item_type == "labor":
+                if not change.labor_id and not change.is_pms:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="labor_id required for labor items, or set is_pms=True"
+                    )
+                if change.labor_id:
+                    labor = db.query(Labor).filter(Labor.id == change.labor_id).first()
+                    if not labor:
+                        raise HTTPException(status_code=400, detail=f"Labor {change.labor_id} not found")
+
+            elif change.item_type == "part":
+                if not change.part_id:
+                    raise HTTPException(status_code=400, detail="part_id required for part items")
+                part = db.query(Part).filter(Part.id == change.part_id).first()
+                if not part:
+                    raise HTTPException(status_code=400, detail=f"Part {change.part_id} not found")
+
+            elif change.item_type == "misc":
+                if change.misc_id:
+                    misc = db.query(Miscellaneous).filter(Miscellaneous.id == change.misc_id).first()
+                    if not misc:
+                        raise HTTPException(status_code=400, detail=f"Miscellaneous {change.misc_id} not found")
+                elif not change.description:
+                    raise HTTPException(status_code=400, detail="misc_id or description required for misc items")
+
+            # Validate discount code if provided
+            if change.discount_code_id:
+                if quote.markup_control_enabled:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Cannot apply discount codes while Markup Discount Control is enabled"
+                    )
+                discount = db.query(DiscountCode).filter(
+                    DiscountCode.id == change.discount_code_id,
+                    DiscountCode.is_archived == False
+                ).first()
+                if not discount:
+                    raise HTTPException(status_code=400, detail="Discount code not found or archived")
+
+            # Create the new line item
+            quantity = change.quantity or 1.0
+            new_item = QuoteLineItem(
+                quote_id=quote_id,
+                item_type=change.item_type,
+                labor_id=change.labor_id,
+                part_id=change.part_id,
+                misc_id=change.misc_id,
+                discount_code_id=change.discount_code_id,
+                description=change.description,
+                quantity=quantity,
+                unit_price=change.unit_price,
+                qty_pending=quantity,
+                qty_fulfilled=0.0,
+                is_pms=change.is_pms,
+                pms_percent=change.pms_percent
+            )
+            db.add(new_item)
+            db.flush()
+
+            # Apply markup control if enabled
+            if quote.markup_control_enabled and not change.is_pms:
+                new_item.original_markup_percent = get_original_markup(new_item, db)
+                new_item.base_cost = calculate_base_cost(new_item, db)
+                if new_item.base_cost and quote.global_markup_percent is not None:
+                    new_item.unit_price = new_item.base_cost * (1 + quote.global_markup_percent / 100)
+
+            item_desc = get_line_item_description(new_item, db)
+            change_descriptions.append(f"Added {item_desc} (qty: {quantity})")
+            adds_count += 1
+
+        elif change.action == "edit":
+            if not change.line_item_id:
+                raise HTTPException(status_code=400, detail="line_item_id required for edit action")
+
+            line_item = (
+                db.query(QuoteLineItem)
+                .filter(
+                    QuoteLineItem.id == change.line_item_id,
+                    QuoteLineItem.quote_id == quote_id
+                )
+                .first()
+            )
+            if not line_item:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Line item {change.line_item_id} not found in this quote"
+                )
+
+            item_desc = get_line_item_description(line_item, db)
+            item_changes = []
+
+            # Update quantity if provided
+            if change.quantity is not None and change.quantity != line_item.quantity:
+                if change.quantity < line_item.qty_fulfilled:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Cannot reduce quantity below fulfilled amount ({line_item.qty_fulfilled}) for {item_desc}"
+                    )
+                item_changes.append(f"qty: {line_item.quantity} → {change.quantity}")
+                line_item.quantity = change.quantity
+                line_item.qty_pending = change.quantity - line_item.qty_fulfilled
+
+            # Update unit_price if provided
+            if change.unit_price is not None and change.unit_price != line_item.unit_price:
+                item_changes.append(f"price: ${line_item.unit_price or 0:.2f} → ${change.unit_price:.2f}")
+                line_item.unit_price = change.unit_price
+
+            # Update discount code if provided
+            if change.discount_code_id is not None:
+                if change.discount_code_id == 0:
+                    # Remove discount code
+                    if line_item.discount_code_id:
+                        item_changes.append("removed discount")
+                    line_item.discount_code_id = None
+                else:
+                    if quote.markup_control_enabled:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Cannot apply discount codes while Markup Discount Control is enabled"
+                        )
+                    discount = db.query(DiscountCode).filter(
+                        DiscountCode.id == change.discount_code_id,
+                        DiscountCode.is_archived == False
+                    ).first()
+                    if not discount:
+                        raise HTTPException(status_code=400, detail="Discount code not found or archived")
+                    if line_item.discount_code_id != change.discount_code_id:
+                        item_changes.append(f"discount: {discount.code}")
+                    line_item.discount_code_id = change.discount_code_id
+
+            # Update description if provided
+            if change.description is not None and change.description != line_item.description:
+                item_changes.append("updated description")
+                line_item.description = change.description
+
+            if item_changes:
+                change_descriptions.append(f"{item_desc}: {', '.join(item_changes)}")
+                edits_count += 1
+
+        elif change.action == "delete":
+            if not change.line_item_id:
+                raise HTTPException(status_code=400, detail="line_item_id required for delete action")
+
+            line_item = (
+                db.query(QuoteLineItem)
+                .filter(
+                    QuoteLineItem.id == change.line_item_id,
+                    QuoteLineItem.quote_id == quote_id
+                )
+                .first()
+            )
+            if not line_item:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Line item {change.line_item_id} not found in this quote"
+                )
+
+            item_desc = get_line_item_description(line_item, db)
+            change_descriptions.append(f"Deleted {item_desc}")
+            db.delete(line_item)
+            deletes_count += 1
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown action: {change.action}")
+
+    # Build action description for snapshot
+    action_parts = []
+    if adds_count > 0:
+        action_parts.append(f"{adds_count} added")
+    if edits_count > 0:
+        action_parts.append(f"{edits_count} edited")
+    if deletes_count > 0:
+        action_parts.append(f"{deletes_count} deleted")
+
+    action_summary = request.commit_message or f"Committed changes ({', '.join(action_parts)})"
+    if change_descriptions:
+        # Include first few changes in description
+        details = "; ".join(change_descriptions[:3])
+        if len(change_descriptions) > 3:
+            details += f" (+{len(change_descriptions) - 3} more)"
+        action_summary += f": {details}"
+
+    # Create snapshot for the commit
+    snapshot = create_snapshot(
+        db=db,
+        quote=quote,
+        action_type="edit",
+        action_description=action_summary
+    )
+
+    db.commit()
+
+    # Reload quote with all relationships
+    quote = (
+        db.query(Quote)
+        .options(
+            joinedload(Quote.project),
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.labor),
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.part),
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous),
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code)
+        )
+        .filter(Quote.id == quote_id)
+        .first()
+    )
+
+    return CommitEditsResponse(
+        success=True,
+        message=f"Successfully committed {len(request.changes)} change(s)",
+        quote=populate_quote_number(quote, quote.project.uca_project_number),
+        snapshot_version=snapshot.version
+    )
 
 
 # ==================== Invoices ====================

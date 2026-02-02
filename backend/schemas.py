@@ -502,3 +502,35 @@ class MarkupControlToggleResponse(BaseModel):
     success: bool
     message: str
     quote: Quote
+
+
+# ===== Commit Edits Schemas (Edit Mode) =====
+class StagedLineItemChange(BaseModel):
+    """Represents a single staged change to a line item."""
+    action: str  # "add", "edit", or "delete"
+    line_item_id: Optional[int] = None  # Required for edit/delete, None for add
+    # For adds and edits:
+    item_type: Optional[str] = None  # "labor", "part", "misc"
+    labor_id: Optional[int] = None
+    part_id: Optional[int] = None
+    misc_id: Optional[int] = None
+    discount_code_id: Optional[int] = None
+    description: Optional[str] = None
+    quantity: Optional[float] = None
+    unit_price: Optional[float] = None
+    is_pms: bool = False
+    pms_percent: Optional[float] = None
+
+
+class CommitEditsRequest(BaseModel):
+    """Request body for committing staged edits to a quote."""
+    changes: List[StagedLineItemChange]
+    commit_message: Optional[str] = None  # Optional description for audit trail
+
+
+class CommitEditsResponse(BaseModel):
+    """Response from committing edits."""
+    success: bool
+    message: str
+    quote: Quote
+    snapshot_version: int

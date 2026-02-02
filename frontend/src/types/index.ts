@@ -395,3 +395,72 @@ export interface MarkupControlToggleResponse {
   message: string;
   quote: Quote;
 }
+
+// ===== Commit Edits (Edit Mode) =====
+export type StagedChangeAction = 'add' | 'edit' | 'delete';
+
+export interface StagedLineItemChange {
+  action: StagedChangeAction;
+  line_item_id?: number;  // Required for edit/delete, undefined for add
+  // For adds and edits:
+  item_type?: LineItemType;
+  labor_id?: number;
+  part_id?: number;
+  misc_id?: number;
+  discount_code_id?: number;
+  description?: string;
+  quantity?: number;
+  unit_price?: number;
+  is_pms?: boolean;
+  pms_percent?: number;
+}
+
+export interface CommitEditsRequest {
+  changes: StagedLineItemChange[];
+  commit_message?: string;
+}
+
+export interface CommitEditsResponse {
+  success: boolean;
+  message: string;
+  quote: Quote;
+  snapshot_version: number;
+}
+
+// ===== Quote Editor Mode (frontend-only state) =====
+export type QuoteEditorMode = 'view' | 'edit' | 'invoicing';
+
+/**
+ * Represents a staged edit to an existing line item (for Edit Mode).
+ * Only contains the changed fields - undefined means "unchanged".
+ */
+export interface StagedEdit {
+  originalItem: QuoteLineItem;  // Reference to the original item for comparison
+  quantity?: number;
+  unit_price?: number;
+  discount_code_id?: number | null;  // null means "remove discount"
+  description?: string;
+}
+
+/**
+ * Represents a new line item being staged for addition (for Edit Mode).
+ * Uses a temporary negative ID to identify it before commit.
+ */
+export interface StagedAdd {
+  tempId: number;  // Negative ID to identify this staged add
+  item_type: LineItemType;
+  labor_id?: number;
+  part_id?: number;
+  misc_id?: number;
+  discount_code_id?: number;
+  description?: string;
+  quantity: number;
+  unit_price?: number;
+  is_pms?: boolean;
+  pms_percent?: number;
+  // Hydrated references for display (populated when staging)
+  labor?: Labor;
+  part?: Part;
+  miscellaneous?: Miscellaneous;
+  discount_code?: DiscountCode;
+}

@@ -52,9 +52,10 @@ import { api } from "@/api/client"
 import type {
   Quote, QuoteLineItem, QuoteLineItemCreate, QuoteLineItemUpdate,
   LineItemType, Part, Labor, Miscellaneous, DiscountCode, QuoteStatus,
-  StagedFulfillment, InvoiceCreate
+  StagedFulfillment, InvoiceCreate, QuoteEditorMode, StagedEdit, StagedAdd,
+  StagedLineItemChange, CommitEditsRequest
 } from "@/types"
-import { Plus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info, Copy, Car, MapPin, X } from "lucide-react"
+import { Plus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info, Copy, Car, MapPin, X, Lock, GitCommit, Eye, AlertTriangle } from "lucide-react"
 import { QuoteAuditTrail } from "./QuoteAuditTrail"
 import { PartForm } from "@/components/forms/PartForm"
 import { LaborForm } from "@/components/forms/LaborForm"
@@ -163,6 +164,26 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   const [addingParking, setAddingParking] = useState(false)
   const [addingTravelDistance, setAddingTravelDistance] = useState(false)
 
+  // ===== Edit Mode State (Issue #8: Commit-based workflow) =====
+  const [editorMode, setEditorMode] = useState<QuoteEditorMode>("view")
+  const [stagedEdits, setStagedEdits] = useState<Map<number, StagedEdit>>(new Map())
+  const [stagedAdds, setStagedAdds] = useState<StagedAdd[]>([])
+  const [stagedDeletes, setStagedDeletes] = useState<Set<number>>(new Set())
+  const [nextTempId, setNextTempId] = useState(-1) // Negative IDs for staged adds
+  const [isCommitting, setIsCommitting] = useState(false)
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false)
+  const [editPreviewOpen, setEditPreviewOpen] = useState(false)
+  const [commitConfirmOpen, setCommitConfirmOpen] = useState(false)
+
+  // Computed: Is quote frozen (has been invoiced)?
+  const hasBeenInvoiced = quote?.line_items.some(item => item.qty_fulfilled > 0) ?? false
+
+  // Computed: Are there any staged changes?
+  const hasStagedChanges = stagedEdits.size > 0 || stagedAdds.length > 0 || stagedDeletes.size > 0
+
+  // Computed: Total count of staged changes
+  const stagedChangesCount = stagedEdits.size + stagedAdds.length + stagedDeletes.size
+
   const fetchQuote = async () => {
     setLoading(true)
     setError(null)
@@ -217,68 +238,162 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   }
 
   const handleAddLineItem = async () => {
-    const lineItem: QuoteLineItemCreate = {
-      item_type: addDialogType,
-      quantity: parseFloat(quantity) || 1,
-    }
+    const qty = parseFloat(quantity) || 1
 
     if (addDialogType === "part") {
       if (!selectedPartId) return
-      lineItem.part_id = parseInt(selectedPartId)
-      const part = parts.find((p) => p.id === lineItem.part_id)
-      if (part) {
-        lineItem.unit_price = part.cost * (1 + (part.markup_percent ?? 0) / 100)
+      const part = parts.find((p) => p.id === parseInt(selectedPartId))
+      if (!part) return
+      const unitPrice = part.cost * (1 + (part.markup_percent ?? 0) / 100)
 
-        // Check if part has linked labor items
-        if (part.labor_items && part.labor_items.length > 0) {
-          setPendingPart(part)
-          setLinkedLaborToAdd(part.labor_items)
-          setAddDialogOpen(false)
-          setAutoAddLaborDialogOpen(true)
-          return
-        }
+      // Check if part has linked labor items
+      if (part.labor_items && part.labor_items.length > 0) {
+        setPendingPart(part)
+        setLinkedLaborToAdd(part.labor_items)
+        setAddDialogOpen(false)
+        setAutoAddLaborDialogOpen(true)
+        return
       }
+
+      // In edit mode, stage the add instead of immediate API call
+      if (editorMode === "edit") {
+        stageAdd({
+          item_type: "part",
+          part_id: part.id,
+          quantity: qty,
+          unit_price: unitPrice,
+          part: part, // For display
+        })
+        setAddDialogOpen(false)
+        return
+      }
+
+      // Direct API call when not in edit mode (should not happen since Add is disabled)
+      try {
+        await api.quotes.addLine(quoteId, {
+          item_type: "part",
+          part_id: part.id,
+          quantity: qty,
+          unit_price: unitPrice,
+        })
+        setAddDialogOpen(false)
+        fetchQuote()
+        onUpdate?.()
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Failed to add line item")
+      }
+
     } else if (addDialogType === "labor") {
       if (!selectedLaborId) return
-      lineItem.labor_id = parseInt(selectedLaborId)
-      const labor = laborItems.find((l) => l.id === lineItem.labor_id)
-      if (labor) {
-        lineItem.unit_price = labor.rate * labor.hours * (1 + labor.markup_percent / 100)
+      const labor = laborItems.find((l) => l.id === parseInt(selectedLaborId))
+      if (!labor) return
+      const unitPrice = labor.rate * labor.hours * (1 + labor.markup_percent / 100)
+
+      // In edit mode, stage the add
+      if (editorMode === "edit") {
+        stageAdd({
+          item_type: "labor",
+          labor_id: labor.id,
+          quantity: qty,
+          unit_price: unitPrice,
+          labor: labor, // For display
+        })
+        setAddDialogOpen(false)
+        return
       }
+
+      try {
+        await api.quotes.addLine(quoteId, {
+          item_type: "labor",
+          labor_id: labor.id,
+          quantity: qty,
+          unit_price: unitPrice,
+        })
+        setAddDialogOpen(false)
+        fetchQuote()
+        onUpdate?.()
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Failed to add line item")
+      }
+
     } else if (addDialogType === "misc") {
       if (!selectedMiscId) return
-      lineItem.misc_id = parseInt(selectedMiscId)
-      const misc = miscItems.find((m) => m.id === lineItem.misc_id)
-      if (misc) {
-        lineItem.unit_price = misc.unit_price * (1 + misc.markup_percent / 100)
-      }
-    }
+      const misc = miscItems.find((m) => m.id === parseInt(selectedMiscId))
+      if (!misc) return
+      const unitPrice = misc.unit_price * (1 + misc.markup_percent / 100)
 
-    try {
-      await api.quotes.addLine(quoteId, lineItem)
-      setAddDialogOpen(false)
-      fetchQuote()
-      onUpdate?.()
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to add line item")
+      // In edit mode, stage the add
+      if (editorMode === "edit") {
+        stageAdd({
+          item_type: "misc",
+          misc_id: misc.id,
+          quantity: qty,
+          unit_price: unitPrice,
+          miscellaneous: misc, // For display
+        })
+        setAddDialogOpen(false)
+        return
+      }
+
+      try {
+        await api.quotes.addLine(quoteId, {
+          item_type: "misc",
+          misc_id: misc.id,
+          quantity: qty,
+          unit_price: unitPrice,
+        })
+        setAddDialogOpen(false)
+        fetchQuote()
+        onUpdate?.()
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Failed to add line item")
+      }
     }
   }
 
   const handleConfirmAutoAddLabor = async () => {
     if (!pendingPart) return
+    const partQuantity = parseFloat(quantity) || 1
+
+    // In edit mode, stage the adds
+    if (editorMode === "edit") {
+      // Stage the part
+      stageAdd({
+        item_type: "part",
+        part_id: pendingPart.id,
+        quantity: partQuantity,
+        unit_price: pendingPart.cost * (1 + (pendingPart.markup_percent ?? 0) / 100),
+        part: pendingPart,
+      })
+
+      // Stage all linked labor items
+      for (const labor of linkedLaborToAdd) {
+        stageAdd({
+          item_type: "labor",
+          labor_id: labor.id,
+          quantity: partQuantity,
+          unit_price: labor.rate * labor.hours * (1 + labor.markup_percent / 100),
+          labor: labor,
+        })
+      }
+
+      setAutoAddLaborDialogOpen(false)
+      setPendingPart(null)
+      setLinkedLaborToAdd([])
+      return
+    }
 
     try {
       // First add the part
       const partLineItem: QuoteLineItemCreate = {
         item_type: "part",
         part_id: pendingPart.id,
-        quantity: parseFloat(quantity) || 1,
+        quantity: partQuantity,
         unit_price: pendingPart.cost * (1 + (pendingPart.markup_percent ?? 0) / 100),
       }
       await api.quotes.addLine(quoteId, partLineItem)
 
       // Then add all linked labor items with same quantity as the part
-      const partQuantity = parseFloat(quantity) || 1
       for (const labor of linkedLaborToAdd) {
         const laborLineItem: QuoteLineItemCreate = {
           item_type: "labor",
@@ -325,9 +440,33 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   const handleUpdateLineItem = async () => {
     if (!editingLineItem) return
 
+    const newQuantity = parseFloat(editQuantity) || 1
+    const newDiscountCodeId = editDiscountCodeId && editDiscountCodeId !== "none" ? parseInt(editDiscountCodeId) : null
+
+    // In edit mode, stage the edit instead of immediate API call
+    if (editorMode === "edit") {
+      const changes: Partial<Omit<StagedEdit, "originalItem">> = {}
+
+      if (newQuantity !== editingLineItem.quantity) {
+        changes.quantity = newQuantity
+      }
+      if (newDiscountCodeId !== editingLineItem.discount_code_id) {
+        changes.discount_code_id = newDiscountCodeId
+      }
+
+      if (Object.keys(changes).length > 0) {
+        stageEdit(editingLineItem, changes)
+      }
+
+      setEditDialogOpen(false)
+      setEditingLineItem(null)
+      return
+    }
+
+    // Direct API call when not in edit mode
     const updateData: QuoteLineItemUpdate = {
-      quantity: parseFloat(editQuantity) || 1,
-      discount_code_id: editDiscountCodeId && editDiscountCodeId !== "none" ? parseInt(editDiscountCodeId) : 0, // 0 to remove
+      quantity: newQuantity,
+      discount_code_id: newDiscountCodeId === null ? 0 : newDiscountCodeId, // 0 to remove
     }
 
     try {
@@ -361,6 +500,164 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       alert(err instanceof Error ? err.message : "Failed to update status")
     }
   }
+
+  // ===== Edit Mode Handlers (Issue #8: Commit-based workflow) =====
+
+  const enterEditMode = () => {
+    if (hasBeenInvoiced) return // Cannot edit frozen quotes
+    if (stagedFulfillments.size > 0) {
+      alert("Please complete or clear your invoice staging before entering Edit mode.")
+      return
+    }
+    setEditorMode("edit")
+  }
+
+  const exitEditMode = (confirmDiscard = false) => {
+    if (hasStagedChanges && !confirmDiscard) {
+      setDiscardConfirmOpen(true)
+      return
+    }
+    // Clear all staged changes
+    setStagedEdits(new Map())
+    setStagedAdds([])
+    setStagedDeletes(new Set())
+    setEditorMode("view")
+    setDiscardConfirmOpen(false)
+  }
+
+  const stageEdit = (item: QuoteLineItem, changes: Partial<Omit<StagedEdit, "originalItem">>) => {
+    const newStagedEdits = new Map(stagedEdits)
+    const existing = newStagedEdits.get(item.id)
+
+    if (existing) {
+      // Merge with existing staged edit
+      newStagedEdits.set(item.id, { ...existing, ...changes })
+    } else {
+      // Create new staged edit
+      newStagedEdits.set(item.id, { originalItem: item, ...changes })
+    }
+
+    // Check if all values are back to original - if so, remove the staged edit
+    const staged = newStagedEdits.get(item.id)!
+    const isUnchanged =
+      (staged.quantity === undefined || staged.quantity === item.quantity) &&
+      (staged.unit_price === undefined || staged.unit_price === item.unit_price) &&
+      (staged.discount_code_id === undefined || staged.discount_code_id === item.discount_code_id) &&
+      (staged.description === undefined || staged.description === item.description)
+
+    if (isUnchanged) {
+      newStagedEdits.delete(item.id)
+    }
+
+    setStagedEdits(newStagedEdits)
+  }
+
+  const stageAdd = (newItem: Omit<StagedAdd, "tempId">) => {
+    const tempId = nextTempId
+    setNextTempId(prev => prev - 1)
+    setStagedAdds(prev => [...prev, { ...newItem, tempId }])
+  }
+
+  const unstageAdd = (tempId: number) => {
+    setStagedAdds(prev => prev.filter(item => item.tempId !== tempId))
+  }
+
+  const stageDelete = (lineItemId: number) => {
+    setStagedDeletes(prev => new Set(prev).add(lineItemId))
+    // Remove from staged edits if it was being edited
+    if (stagedEdits.has(lineItemId)) {
+      const newStagedEdits = new Map(stagedEdits)
+      newStagedEdits.delete(lineItemId)
+      setStagedEdits(newStagedEdits)
+    }
+  }
+
+  const unstageDelete = (lineItemId: number) => {
+    setStagedDeletes(prev => {
+      const newSet = new Set(prev)
+      newSet.delete(lineItemId)
+      return newSet
+    })
+  }
+
+  const handleCommitChanges = async () => {
+    if (!hasStagedChanges) return
+
+    setIsCommitting(true)
+    setCommitConfirmOpen(false)
+
+    try {
+      const changes: StagedLineItemChange[] = []
+
+      // Add staged adds
+      for (const add of stagedAdds) {
+        changes.push({
+          action: "add",
+          item_type: add.item_type,
+          labor_id: add.labor_id,
+          part_id: add.part_id,
+          misc_id: add.misc_id,
+          discount_code_id: add.discount_code_id,
+          description: add.description,
+          quantity: add.quantity,
+          unit_price: add.unit_price,
+          is_pms: add.is_pms,
+          pms_percent: add.pms_percent,
+        })
+      }
+
+      // Add staged edits
+      for (const [lineItemId, edit] of stagedEdits) {
+        changes.push({
+          action: "edit",
+          line_item_id: lineItemId,
+          quantity: edit.quantity,
+          unit_price: edit.unit_price,
+          discount_code_id: edit.discount_code_id === null ? 0 : edit.discount_code_id,
+          description: edit.description,
+        })
+      }
+
+      // Add staged deletes
+      for (const lineItemId of stagedDeletes) {
+        changes.push({
+          action: "delete",
+          line_item_id: lineItemId,
+        })
+      }
+
+      const request: CommitEditsRequest = { changes }
+      await api.quotes.commitEdits(quoteId, request)
+
+      // Clear staged changes and exit edit mode
+      setStagedEdits(new Map())
+      setStagedAdds([])
+      setStagedDeletes(new Set())
+      setEditorMode("view")
+
+      // Refresh quote data
+      fetchQuote()
+      onUpdate?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to commit changes")
+    } finally {
+      setIsCommitting(false)
+    }
+  }
+
+  // Helper to get display value considering staged edits
+  const getDisplayQuantity = (item: QuoteLineItem): number => {
+    const staged = stagedEdits.get(item.id)
+    return staged?.quantity ?? item.quantity
+  }
+
+  const getDisplayUnitPrice = (item: QuoteLineItem): number | undefined => {
+    const staged = stagedEdits.get(item.id)
+    return staged?.unit_price ?? item.unit_price
+  }
+
+  // Check if controls should be enabled based on mode
+  const canEdit = editorMode === "edit" && !hasBeenInvoiced
 
   const handleSaveClientPoNumber = async () => {
     setSavingClientPo(true)
@@ -1177,42 +1474,48 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
             {items.length > 0 && <StackedProgress items={items} />}
           </div>
           <div className="flex gap-2">
-            {getSectionButtonState(items) === 'clear' ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleClearAllStaged(type)}
-                className="text-green-600 dark:text-green-400 border-green-300 dark:border-green-700 hover:bg-green-50 dark:hover:bg-green-950"
-              >
-                <X className="h-4 w-4 mr-1" />
-                Clear All Staged
-              </Button>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleFulfillAll(type)}
-                disabled={getSectionButtonState(items) === 'disabled'}
-              >
-                <ClipboardCheck className="h-4 w-4 mr-1" />
-                Fulfill All
-              </Button>
+            {/* Invoicing buttons - only enabled when NOT in edit mode */}
+            {editorMode !== "edit" && (
+              <>
+                {getSectionButtonState(items) === 'clear' ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleClearAllStaged(type)}
+                    className="text-green-600 dark:text-green-400 border-green-300 dark:border-green-700 hover:bg-green-50 dark:hover:bg-green-950"
+                  >
+                    <X className="h-4 w-4 mr-1" />
+                    Clear All Staged
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleFulfillAll(type)}
+                    disabled={getSectionButtonState(items) === 'disabled'}
+                  >
+                    <ClipboardCheck className="h-4 w-4 mr-1" />
+                    Fulfill All
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleOpenBulkStageDialog(type)}
+                  disabled={!items.some(item => item.qty_pending > 0)}
+                  title="Stage percentage of pending quantities"
+                >
+                  <Percent className="h-4 w-4 mr-1" />
+                  Stage %
+                </Button>
+              </>
             )}
             <Button
               variant="outline"
               size="sm"
-              onClick={() => handleOpenBulkStageDialog(type)}
-              disabled={!items.some(item => item.qty_pending > 0)}
-              title="Stage percentage of pending quantities"
-            >
-              <Percent className="h-4 w-4 mr-1" />
-              Stage %
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
               onClick={() => handleOpenDiscountAll(type)}
-              disabled={quote?.markup_control_enabled || items.length === 0}
+              disabled={quote?.markup_control_enabled || items.length === 0 || hasBeenInvoiced || editorMode !== "edit"}
+              title={hasBeenInvoiced ? "Quote is frozen" : editorMode !== "edit" ? "Enter Edit Mode first" : "Apply discount to all items"}
             >
               <Tag className="h-4 w-4 mr-1" />
               Discount All
@@ -1222,7 +1525,9 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               variant="outline"
               size="sm"
               onClick={() => openAddDialog(type)}
+              disabled={hasBeenInvoiced || editorMode !== "edit"}
               className="gap-2"
+              title={hasBeenInvoiced ? "Quote is frozen" : editorMode !== "edit" ? "Enter Edit Mode to add items" : `Add ${addButtonLabel}`}
             >
               <Plus className="h-4 w-4" />
               {addButtonLabel}
@@ -1253,11 +1558,31 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
             <TableBody>
               {items.map((item) => {
                 const staged = stagedFulfillments.get(item.id)
+                const isDeleted = stagedDeletes.has(item.id)
+                const isEdited = stagedEdits.has(item.id)
                 return (
-                  <TableRow key={item.id} className={`${staged ? "border-l-4 border-l-green-500 dark:border-l-green-400" : ""} ${item.qty_pending === 0 ? "opacity-50" : ""}`}>
+                  <TableRow
+                    key={item.id}
+                    className={`
+                      ${staged ? "border-l-4 border-l-green-500 dark:border-l-green-400" : ""}
+                      ${isEdited && !isDeleted ? "border-l-4 border-l-blue-500 dark:border-l-blue-400 bg-blue-50/50 dark:bg-blue-950/50" : ""}
+                      ${isDeleted ? "border-l-4 border-l-red-500 dark:border-l-red-400 bg-red-50/50 dark:bg-red-950/50 line-through opacity-60" : ""}
+                      ${item.qty_pending === 0 && !isDeleted ? "opacity-50" : ""}
+                    `}
+                  >
                     <TableCell>
-                      <div>
+                      <div className="flex items-center gap-2">
                         <span className="font-medium">{getLineItemDescription(item)}</span>
+                        {isEdited && !isDeleted && (
+                          <Badge variant="outline" className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 border-blue-300">
+                            Edited
+                          </Badge>
+                        )}
+                        {isDeleted && (
+                          <Badge variant="outline" className="text-xs bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300 border-red-300">
+                            Deleted
+                          </Badge>
+                        )}
                         {item.item_type === "part" && item.part && (
                           <span className="text-muted-foreground ml-2">- {item.part.description}</span>
                         )}
@@ -1342,15 +1667,18 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       )}
                     </TableCell>
                     <TableCell className="text-right space-x-1">
+                      {/* Edit button - disabled when frozen, enabled in edit mode */}
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => openEditDialog(item)}
-                        title="Edit"
+                        disabled={hasBeenInvoiced || (editorMode !== "edit" && editorMode !== "view") || isDeleted}
+                        title={hasBeenInvoiced ? "Quote is frozen" : isDeleted ? "Item marked for deletion" : "Edit"}
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      {staged && (
+                      {/* Clear staged fulfillment - only in invoicing mode */}
+                      {staged && editorMode !== "edit" && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -1361,15 +1689,47 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                           <X className="h-4 w-4" />
                         </Button>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteLine(item.id)}
-                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {/* Undo staged edit - in edit mode when item is edited */}
+                      {isEdited && !isDeleted && editorMode === "edit" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            const newEdits = new Map(stagedEdits)
+                            newEdits.delete(item.id)
+                            setStagedEdits(newEdits)
+                          }}
+                          title="Undo edit"
+                          className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      )}
+                      {/* Undo delete - in edit mode when item is staged for delete */}
+                      {isDeleted && editorMode === "edit" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => unstageDelete(item.id)}
+                          title="Undo delete"
+                          className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      )}
+                      {/* Delete button - stages delete in edit mode, direct delete otherwise */}
+                      {!isDeleted && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => editorMode === "edit" ? stageDelete(item.id) : handleDeleteLine(item.id)}
+                          disabled={hasBeenInvoiced || (editorMode !== "edit" && editorMode !== "view")}
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          title={hasBeenInvoiced ? "Quote is frozen" : editorMode === "edit" ? "Mark for deletion" : "Delete"}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 )
@@ -1425,6 +1785,50 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
   return (
     <div className="p-6 space-y-6 pb-24">
+      {/* Frozen Banner */}
+      {hasBeenInvoiced && (
+        <Card className="border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950">
+          <CardContent className="py-3">
+            <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
+              <Lock className="h-4 w-4" />
+              <span className="font-medium">Quote Frozen</span>
+              <span className="text-sm">— This quote has been invoiced. You can create additional invoices but cannot modify line items.</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Edit Mode Banner */}
+      {editorMode === "edit" && (
+        <Card className="border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950">
+          <CardContent className="py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+                <Pencil className="h-4 w-4" />
+                <span className="font-medium">Edit Mode</span>
+                <span className="text-sm">— Changes are staged until you commit them.</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {hasStagedChanges && (
+                  <Badge variant="secondary" className="bg-blue-100 dark:bg-blue-900">
+                    {stagedChangesCount} change{stagedChangesCount !== 1 ? "s" : ""} staged
+                  </Badge>
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => exitEditMode()}
+                  className="text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900"
+                >
+                  <X className="h-4 w-4 mr-1" />
+                  Exit Edit Mode
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Header */}
       <div className="flex justify-between items-start">
         <div>
@@ -1434,6 +1838,20 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Edit Quote Button - only shown when not frozen and in view mode */}
+          {!hasBeenInvoiced && editorMode === "view" && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={enterEditMode}
+              disabled={stagedFulfillments.size > 0}
+              className="gap-2"
+              title={stagedFulfillments.size > 0 ? "Clear invoice staging first" : "Enter Edit Mode to modify line items"}
+            >
+              <Pencil className="h-4 w-4" />
+              Edit Quote
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -2032,38 +2450,112 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         </Card>
       )}
 
-      {/* Floating Invoice Button */}
-      <div className="fixed bottom-6 right-6 z-50">
-        <div className="flex flex-col items-end gap-2">
-          {!quote.client_po_number && stagedCount > 0 && (
-            <span className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-950 dark:text-amber-400 px-3 py-1 rounded-md shadow-sm">
-              Client PO Number required
-            </span>
-          )}
-          <div className="flex gap-2">
-            {stagedCount > 0 && (
+      {/* Floating Invoice Button - only show when NOT in edit mode */}
+      {editorMode !== "edit" && (
+        <div className="fixed bottom-6 right-6 z-50">
+          <div className="flex flex-col items-end gap-2">
+            {!quote.client_po_number && stagedCount > 0 && (
+              <span className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-950 dark:text-amber-400 px-3 py-1 rounded-md shadow-sm">
+                Client PO Number required
+              </span>
+            )}
+            <div className="flex gap-2">
+              {stagedCount > 0 && (
+                <Button
+                  size="lg"
+                  variant="outline"
+                  onClick={() => setPreviewModalOpen(true)}
+                  className="shadow-lg gap-2"
+                >
+                  <FileText className="h-5 w-5" />
+                  Preview
+                </Button>
+              )}
               <Button
                 size="lg"
-                variant="outline"
-                onClick={() => setPreviewModalOpen(true)}
+                onClick={() => setConfirmDialogOpen(true)}
+                disabled={stagedCount === 0 || isCreatingInvoice || !quote.client_po_number}
                 className="shadow-lg gap-2"
               >
-                <FileText className="h-5 w-5" />
-                Preview
+                <Receipt className="h-5 w-5" />
+                {isCreatingInvoice ? "Creating..." : `Create Invoice${stagedCount > 0 ? ` (${stagedCount} items)` : ""}`}
               </Button>
-            )}
-            <Button
-              size="lg"
-              onClick={() => setConfirmDialogOpen(true)}
-              disabled={stagedCount === 0 || isCreatingInvoice || !quote.client_po_number}
-              className="shadow-lg gap-2"
-            >
-              <Receipt className="h-5 w-5" />
-              {isCreatingInvoice ? "Creating..." : `Create Invoice${stagedCount > 0 ? ` (${stagedCount} items)` : ""}`}
-            </Button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Floating Edit Summary Card - only show in edit mode with staged changes */}
+      {editorMode === "edit" && hasStagedChanges && (
+        <Card className="fixed bottom-24 left-6 w-80 shadow-lg border-blue-200 dark:border-blue-800 bg-card z-50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Pencil className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              Pending Changes
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {stagedAdds.length > 0 && (
+              <div className="flex justify-between">
+                <span className="text-green-600 dark:text-green-400">Added</span>
+                <span className="font-medium">{stagedAdds.length} item{stagedAdds.length !== 1 ? "s" : ""}</span>
+              </div>
+            )}
+            {stagedEdits.size > 0 && (
+              <div className="flex justify-between">
+                <span className="text-blue-600 dark:text-blue-400">Modified</span>
+                <span className="font-medium">{stagedEdits.size} item{stagedEdits.size !== 1 ? "s" : ""}</span>
+              </div>
+            )}
+            {stagedDeletes.size > 0 && (
+              <div className="flex justify-between">
+                <span className="text-red-600 dark:text-red-400">Deleted</span>
+                <span className="font-medium">{stagedDeletes.size} item{stagedDeletes.size !== 1 ? "s" : ""}</span>
+              </div>
+            )}
+            <Separator />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDiscardConfirmOpen(true)}
+              className="w-full text-destructive hover:text-destructive"
+            >
+              <X className="h-4 w-4 mr-1" />
+              Discard All Changes
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Floating Commit Button - only show in edit mode */}
+      {editorMode === "edit" && (
+        <div className="fixed bottom-6 right-6 z-50">
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex gap-2">
+              {hasStagedChanges && (
+                <Button
+                  size="lg"
+                  variant="outline"
+                  onClick={() => setEditPreviewOpen(true)}
+                  className="shadow-lg gap-2"
+                >
+                  <Eye className="h-5 w-5" />
+                  Preview Changes
+                </Button>
+              )}
+              <Button
+                size="lg"
+                onClick={() => setCommitConfirmOpen(true)}
+                disabled={!hasStagedChanges || isCommitting}
+                className="shadow-lg gap-2 bg-blue-600 hover:bg-blue-700"
+              >
+                <GitCommit className="h-5 w-5" />
+                {isCommitting ? "Committing..." : `Commit Changes${hasStagedChanges ? ` (${stagedChangesCount})` : ""}`}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Line Item Dialog */}
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
@@ -2700,6 +3192,157 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               disabled={!selectedTravelDistanceId || addingTravelDistance}
             >
               {addingTravelDistance ? "Adding..." : "Add Travel Distance"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Discard Changes Confirmation Dialog */}
+      <AlertDialog open={discardConfirmOpen} onOpenChange={setDiscardConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Discard Changes?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              You have {stagedChangesCount} unsaved change{stagedChangesCount !== 1 ? "s" : ""}. Are you sure you want to discard all changes? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Editing</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => exitEditMode(true)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Discard Changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Commit Changes Confirmation Dialog */}
+      <AlertDialog open={commitConfirmOpen} onOpenChange={setCommitConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <GitCommit className="h-5 w-5 text-blue-500" />
+              Commit Changes?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              You are about to commit {stagedChangesCount} change{stagedChangesCount !== 1 ? "s" : ""} to this quote:
+              <ul className="mt-2 space-y-1 text-sm">
+                {stagedAdds.length > 0 && (
+                  <li className="text-green-600 dark:text-green-400">• {stagedAdds.length} item{stagedAdds.length !== 1 ? "s" : ""} added</li>
+                )}
+                {stagedEdits.size > 0 && (
+                  <li className="text-blue-600 dark:text-blue-400">• {stagedEdits.size} item{stagedEdits.size !== 1 ? "s" : ""} modified</li>
+                )}
+                {stagedDeletes.size > 0 && (
+                  <li className="text-red-600 dark:text-red-400">• {stagedDeletes.size} item{stagedDeletes.size !== 1 ? "s" : ""} deleted</li>
+                )}
+              </ul>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleCommitChanges}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              Commit Changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Edit Preview Dialog */}
+      <Dialog open={editPreviewOpen} onOpenChange={setEditPreviewOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5" />
+              Preview Changes
+            </DialogTitle>
+            <DialogDescription>
+              Review your staged changes before committing.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {stagedAdds.length > 0 && (
+              <div>
+                <h4 className="font-medium text-green-600 dark:text-green-400 mb-2">Added Items ({stagedAdds.length})</h4>
+                <div className="space-y-2">
+                  {stagedAdds.map(item => (
+                    <div key={item.tempId} className="p-2 bg-green-50 dark:bg-green-950 rounded border border-green-200 dark:border-green-800">
+                      <span className="font-medium">
+                        {item.item_type === "part" && item.part?.part_number}
+                        {item.item_type === "labor" && (item.labor?.description || item.description || "Labour")}
+                        {item.item_type === "misc" && (item.miscellaneous?.description || item.description || "Miscellaneous")}
+                      </span>
+                      <span className="text-muted-foreground ml-2">× {item.quantity}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {stagedEdits.size > 0 && (
+              <div>
+                <h4 className="font-medium text-blue-600 dark:text-blue-400 mb-2">Modified Items ({stagedEdits.size})</h4>
+                <div className="space-y-2">
+                  {Array.from(stagedEdits.entries()).map(([id, edit]) => (
+                    <div key={id} className="p-2 bg-blue-50 dark:bg-blue-950 rounded border border-blue-200 dark:border-blue-800">
+                      <span className="font-medium">
+                        {edit.originalItem.part?.part_number ||
+                         edit.originalItem.labor?.description ||
+                         edit.originalItem.miscellaneous?.description ||
+                         edit.originalItem.description ||
+                         "Item"}
+                      </span>
+                      <div className="text-sm text-muted-foreground mt-1">
+                        {edit.quantity !== undefined && (
+                          <div>Qty: {edit.originalItem.quantity} → {edit.quantity}</div>
+                        )}
+                        {edit.unit_price !== undefined && (
+                          <div>Price: ${edit.originalItem.unit_price?.toFixed(2)} → ${edit.unit_price.toFixed(2)}</div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {stagedDeletes.size > 0 && (
+              <div>
+                <h4 className="font-medium text-red-600 dark:text-red-400 mb-2">Deleted Items ({stagedDeletes.size})</h4>
+                <div className="space-y-2">
+                  {Array.from(stagedDeletes).map(id => {
+                    const item = quote?.line_items.find(li => li.id === id)
+                    return item ? (
+                      <div key={id} className="p-2 bg-red-50 dark:bg-red-950 rounded border border-red-200 dark:border-red-800 line-through opacity-60">
+                        <span className="font-medium">
+                          {item.part?.part_number ||
+                           item.labor?.description ||
+                           item.miscellaneous?.description ||
+                           item.description ||
+                           "Item"}
+                        </span>
+                        <span className="text-muted-foreground ml-2">× {item.quantity}</span>
+                      </div>
+                    ) : null
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditPreviewOpen(false)}>
+              Close
+            </Button>
+            <Button onClick={() => { setEditPreviewOpen(false); setCommitConfirmOpen(true); }} className="bg-blue-600 hover:bg-blue-700">
+              Commit Changes
             </Button>
           </DialogFooter>
         </DialogContent>
