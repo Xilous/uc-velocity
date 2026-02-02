@@ -57,7 +57,7 @@ export function ProjectDetailsPage({ projectId, onBack }: ProjectDetailsPageProp
   const [selectedVendorId, setSelectedVendorId] = useState<string>("")
 
   // Invoices from all quotes
-  const [invoices, setInvoices] = useState<(Invoice & { quoteId: number })[]>([])
+  const [invoices, setInvoices] = useState<(Invoice & { quoteId: number; quoteNumber: string })[]>([])
 
   const fetchProject = async () => {
     setLoading(true)
@@ -81,12 +81,12 @@ export function ProjectDetailsPage({ projectId, onBack }: ProjectDetailsPageProp
     }
   }
 
-  const fetchInvoices = async (quotes: { id: number }[]) => {
+  const fetchInvoices = async (quotes: { id: number; quote_number: string }[]) => {
     try {
-      const allInvoices: (Invoice & { quoteId: number })[] = []
+      const allInvoices: (Invoice & { quoteId: number; quoteNumber: string })[] = []
       for (const quote of quotes) {
         const quoteInvoices = await api.quotes.getInvoices(quote.id)
-        allInvoices.push(...quoteInvoices.map(inv => ({ ...inv, quoteId: quote.id })))
+        allInvoices.push(...quoteInvoices.map(inv => ({ ...inv, quoteId: quote.id, quoteNumber: quote.quote_number })))
       }
       // Sort by created_at descending
       allInvoices.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
@@ -262,7 +262,7 @@ export function ProjectDetailsPage({ projectId, onBack }: ProjectDetailsPageProp
                         onClick={() => setSelectedDoc({ type: "quote", id: quote.id })}
                       >
                         <div>
-                          <div className="text-sm font-medium">Quote #{quote.id}</div>
+                          <div className="text-sm font-medium">{quote.quote_number}</div>
                           <div className="text-xs text-muted-foreground">
                             {new Date(quote.created_at).toLocaleDateString()}
                           </div>
@@ -369,7 +369,7 @@ export function ProjectDetailsPage({ projectId, onBack }: ProjectDetailsPageProp
                             </Badge>
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            Quote #{invoice.quoteId} - {new Date(invoice.created_at).toLocaleDateString()}
+                            {invoice.quoteNumber} - {new Date(invoice.created_at).toLocaleDateString()}
                           </div>
                         </div>
                       </div>

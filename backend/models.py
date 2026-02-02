@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, Enum, Table, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, Enum, Table, DateTime, Boolean, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -152,9 +152,13 @@ class Project(Base):
 
 class Quote(Base):
     __tablename__ = "quotes"
+    __table_args__ = (
+        UniqueConstraint('project_id', 'quote_sequence', name='uq_quote_project_sequence'),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
+    quote_sequence = Column(Integer, nullable=False)  # Per-project sequence number (1, 2, 3...)
     created_at = Column(DateTime, default=datetime.utcnow)
     status = Column(String, default="Active")  # "Active" or "Invoiced"
     current_version = Column(Integer, default=0)  # Current snapshot version

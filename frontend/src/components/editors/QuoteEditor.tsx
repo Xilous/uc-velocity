@@ -1134,7 +1134,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       if (onSelectQuote) {
         onSelectQuote(clonedQuote.id)
       } else {
-        alert(`Quote cloned successfully! New Quote #${clonedQuote.id}`)
+        alert(`Quote cloned successfully! New quote: ${clonedQuote.quote_number}`)
       }
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to clone quote")
@@ -1428,7 +1428,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       {/* Header */}
       <div className="flex justify-between items-start">
         <div>
-          <h2 className="text-xl font-semibold">Quote #{quote.id}</h2>
+          <h2 className="text-xl font-semibold">{quote.quote_number}</h2>
           <p className="text-sm text-muted-foreground">
             Created: {new Date(quote.created_at).toLocaleDateString()}
           </p>

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
 from typing import List, Optional
 
 from database import get_db
@@ -162,6 +163,64 @@ def get_original_markup(item: QuoteLineItem, db: Session) -> float:
     return 0
 
 
+def get_next_quote_sequence(db: Session, project_id: int) -> int:
+    """
+    Get the next quote sequence number for a project.
+
+    This function should be called within a transaction where the project
+    row is locked (using with_for_update()) to prevent race conditions.
+
+    Args:
+        db: Database session
+        project_id: The project ID to get next sequence for
+
+    Returns:
+        The next sequence number (1-based, increments from max existing)
+    """
+    max_seq = db.query(func.max(Quote.quote_sequence)).filter(
+        Quote.project_id == project_id
+    ).scalar()
+    return (max_seq or 0) + 1
+
+
+def format_quote_number(uca_project_number: str, quote_sequence: int, current_version: int) -> str:
+    """
+    Format the full quote number string.
+
+    Format: {UCA Project Number}-{Sequence:04d}-{Version}
+    Example: A2132-0001-0, A2132-0001-10
+
+    Args:
+        uca_project_number: The project's UCA number (e.g., "A2132")
+        quote_sequence: The per-project sequence number (1, 2, 3...)
+        current_version: The audit trail version (0, 1, 2, 10...)
+
+    Returns:
+        Formatted quote number string
+    """
+    return f"{uca_project_number}-{quote_sequence:04d}-{current_version}"
+
+
+def populate_quote_number(quote: Quote, uca_project_number: str) -> QuoteSchema:
+    """
+    Convert a Quote ORM object to a QuoteSchema with computed quote_number.
+
+    Args:
+        quote: The Quote ORM object
+        uca_project_number: The project's UCA number
+
+    Returns:
+        QuoteSchema with quote_number populated
+    """
+    response = QuoteSchema.model_validate(quote)
+    response.quote_number = format_quote_number(
+        uca_project_number,
+        quote.quote_sequence,
+        quote.current_version
+    )
+    return response
+
+
 router = APIRouter(prefix="/quotes", tags=["quotes"])
 
 
@@ -170,12 +229,16 @@ def get_all_quotes(skip: int = 0, limit: int = 100, db: Session = Depends(get_db
     """Get all quotes."""
     quotes = (
         db.query(Quote)
-        .options(joinedload(Quote.line_items))
+        .options(
+            joinedload(Quote.project),  # Need project for uca_project_number
+            joinedload(Quote.line_items)
+        )
         .offset(skip)
         .limit(limit)
         .all()
     )
-    return quotes
+    # Return with computed quote_numbers
+    return [populate_quote_number(q, q.project.uca_project_number) for q in quotes]
 
 
 @router.get("/{quote_id}", response_model=QuoteSchema)
@@ -184,6 +247,7 @@ def get_quote(quote_id: int, db: Session = Depends(get_db)):
     quote = (
         db.query(Quote)
         .options(
+            joinedload(Quote.project),  # Need project for uca_project_number
             joinedload(Quote.line_items).joinedload(QuoteLineItem.labor),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.part),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous),
@@ -194,19 +258,27 @@ def get_quote(quote_id: int, db: Session = Depends(get_db)):
     )
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
-    return quote
+
+    # Return with computed quote_number
+    return populate_quote_number(quote, quote.project.uca_project_number)
 
 
 @router.post("/", response_model=QuoteSchema)
 def create_quote(quote_data: QuoteCreate, db: Session = Depends(get_db)):
     """Create a new quote for a project."""
-    # Verify project exists
-    project = db.query(Project).filter(Project.id == quote_data.project_id).first()
+    # Lock project row to prevent race conditions when generating sequence number
+    project = db.query(Project).filter(
+        Project.id == quote_data.project_id
+    ).with_for_update().first()
     if not project:
         raise HTTPException(status_code=400, detail="Project not found")
 
+    # Get next sequence number for this project
+    next_sequence = get_next_quote_sequence(db, quote_data.project_id)
+
     db_quote = Quote(
         project_id=quote_data.project_id,
+        quote_sequence=next_sequence,
         status=quote_data.status,
         client_po_number=quote_data.client_po_number,
         work_description=quote_data.work_description
@@ -214,13 +286,20 @@ def create_quote(quote_data: QuoteCreate, db: Session = Depends(get_db)):
     db.add(db_quote)
     db.commit()
     db.refresh(db_quote)
-    return db_quote
+
+    # Return with computed quote_number
+    return populate_quote_number(db_quote, project.uca_project_number)
 
 
 @router.put("/{quote_id}", response_model=QuoteSchema)
 def update_quote(quote_id: int, quote_data: QuoteUpdate, db: Session = Depends(get_db)):
     """Update quote status."""
-    db_quote = db.query(Quote).filter(Quote.id == quote_id).first()
+    db_quote = (
+        db.query(Quote)
+        .options(joinedload(Quote.project))  # Need project for uca_project_number
+        .filter(Quote.id == quote_id)
+        .first()
+    )
     if not db_quote:
         raise HTTPException(status_code=404, detail="Quote not found")
 
@@ -237,7 +316,9 @@ def update_quote(quote_id: int, quote_data: QuoteUpdate, db: Session = Depends(g
 
     db.commit()
     db.refresh(db_quote)
-    return db_quote
+
+    # Return with computed quote_number
+    return populate_quote_number(db_quote, db_quote.project.uca_project_number)
 
 
 @router.delete("/{quote_id}")
@@ -262,6 +343,7 @@ def clone_quote(quote_id: int, db: Session = Depends(get_db)):
     - Fulfillment quantities reset (qty_fulfilled=0, qty_pending=quantity)
     - Markup control disabled
     - Same project, client_po_number, and work_description
+    - NEW quote_sequence (gets next available for the project)
     """
     # Fetch the source quote with all line items
     source_quote = (
@@ -273,9 +355,17 @@ def clone_quote(quote_id: int, db: Session = Depends(get_db)):
     if not source_quote:
         raise HTTPException(status_code=404, detail="Quote not found")
 
-    # Create new quote with copied fields
+    # Lock project row and get next sequence number
+    project = db.query(Project).filter(
+        Project.id == source_quote.project_id
+    ).with_for_update().first()
+
+    next_sequence = get_next_quote_sequence(db, source_quote.project_id)
+
+    # Create new quote with copied fields and new sequence
     new_quote = Quote(
         project_id=source_quote.project_id,
+        quote_sequence=next_sequence,  # New sequence number
         status="Active",  # Always reset to Active
         client_po_number=source_quote.client_po_number,
         work_description=source_quote.work_description,
@@ -312,6 +402,7 @@ def clone_quote(quote_id: int, db: Session = Depends(get_db)):
     new_quote = (
         db.query(Quote)
         .options(
+            joinedload(Quote.project),  # Need project for uca_project_number
             joinedload(Quote.line_items).joinedload(QuoteLineItem.labor),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.part),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous),
@@ -320,7 +411,9 @@ def clone_quote(quote_id: int, db: Session = Depends(get_db)):
         .filter(Quote.id == new_quote.id)
         .first()
     )
-    return new_quote
+
+    # Return with computed quote_number
+    return populate_quote_number(new_quote, project.uca_project_number)
 
 
 # ==================== Markup Discount Control ====================
@@ -1095,10 +1188,11 @@ def revert_to_snapshot(quote_id: int, version: int, db: Session = Depends(get_db
 
     db.commit()
 
-    # Return updated quote
+    # Return updated quote with quote_number
     quote = (
         db.query(Quote)
         .options(
+            joinedload(Quote.project),  # Need project for uca_project_number
             joinedload(Quote.line_items).joinedload(QuoteLineItem.labor),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.part),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous),
@@ -1107,4 +1201,5 @@ def revert_to_snapshot(quote_id: int, version: int, db: Session = Depends(get_db
         .filter(Quote.id == quote_id)
         .first()
     )
-    return quote
+
+    return populate_quote_number(quote, quote.project.uca_project_number)

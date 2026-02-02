@@ -5,7 +5,12 @@ import re
 
 from database import get_db
 from models import Project, Profile, ProfileType, PurchaseOrder, Quote
-from schemas import ProjectCreate, ProjectUpdate, Project as ProjectSchema, ProjectFull
+from schemas import ProjectCreate, ProjectUpdate, Project as ProjectSchema, ProjectFull, Quote as QuoteSchema
+
+
+def format_quote_number(uca_project_number: str, quote_sequence: int, current_version: int) -> str:
+    """Format the full quote number: {UCA}-{Sequence:04d}-{Version}"""
+    return f"{uca_project_number}-{quote_sequence:04d}-{current_version}"
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -100,7 +105,16 @@ def get_project(project_id: int, db: Session = Depends(get_db)):
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    return project
+
+    # Build response with computed quote_numbers for each quote
+    response = ProjectFull.model_validate(project)
+    for i, quote in enumerate(project.quotes):
+        response.quotes[i].quote_number = format_quote_number(
+            project.uca_project_number,
+            quote.quote_sequence,
+            quote.current_version
+        )
+    return response
 
 
 @router.post("/", response_model=ProjectSchema)

@@ -225,6 +225,8 @@ export type QuoteStatus = 'Active' | 'Invoiced';
 export interface Quote {
   id: number;
   project_id: number;
+  quote_sequence: number;  // Per-project sequence number (1, 2, 3...)
+  quote_number: string;    // Formatted: "{UCA Project Number}-{Sequence:04d}-{Version}"
   created_at: string;
   status: QuoteStatus;
   current_version: number;

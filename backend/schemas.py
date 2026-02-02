@@ -322,6 +322,8 @@ class QuoteUpdate(BaseModel):
 
 class Quote(QuoteBase):
     id: int
+    quote_sequence: int  # Per-project sequence number (1, 2, 3...)
+    quote_number: Optional[str] = None  # Computed: "{UCA Project Number}-{Sequence:04d}-{Version}"
     created_at: datetime
     current_version: int = 0
     line_items: List[QuoteLineItem] = []
