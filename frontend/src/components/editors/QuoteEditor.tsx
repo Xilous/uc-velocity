@@ -1276,6 +1276,37 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                 item.misc_id === parkingItem.id
       )
 
+      // In edit mode, stage the changes instead of making direct API calls
+      if (editorMode === "edit") {
+        // Also check staged adds for already-staged parking
+        const stagedParkingAdd = stagedAdds.find(
+          add => add.item_type === "misc" && add.misc_id === parkingItem.id
+        )
+
+        if (existingParkingLine) {
+          // Stage an edit to the existing line item's quantity
+          stageEdit(existingParkingLine, { quantity: parkingQty })
+        } else if (stagedParkingAdd) {
+          // Update the already-staged parking add's quantity
+          setStagedAdds(prev => prev.map(add =>
+            add.tempId === stagedParkingAdd.tempId
+              ? { ...add, quantity: parkingQty }
+              : add
+          ))
+        } else {
+          // Stage a new add
+          stageAdd({
+            item_type: "misc",
+            misc_id: parkingItem.id,
+            quantity: parkingQty,
+            unit_price: parkingItem.unit_price * (1 + parkingItem.markup_percent / 100),
+            miscellaneous: parkingItem, // For display
+          })
+        }
+        return
+      }
+
+      // Non-edit mode: direct API calls (original behavior)
       if (existingParkingLine) {
         // Update existing line item quantity
         await api.quotes.updateLine(quoteId, existingParkingLine.id, {
@@ -1338,6 +1369,38 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                 item.misc_id === selectedItem.id
       )
 
+      // In edit mode, stage the changes instead of making direct API calls
+      if (editorMode === "edit") {
+        // Also check staged adds for already-staged travel item
+        const stagedTravelAdd = stagedAdds.find(
+          add => add.item_type === "misc" && add.misc_id === selectedItem.id
+        )
+
+        if (existingLine) {
+          // Stage an edit to the existing line item's quantity
+          stageEdit(existingLine, { quantity: days })
+        } else if (stagedTravelAdd) {
+          // Update the already-staged travel add's quantity
+          setStagedAdds(prev => prev.map(add =>
+            add.tempId === stagedTravelAdd.tempId
+              ? { ...add, quantity: days }
+              : add
+          ))
+        } else {
+          // Stage a new add
+          stageAdd({
+            item_type: "misc",
+            misc_id: selectedItem.id,
+            quantity: days,
+            unit_price: selectedItem.unit_price * (1 + selectedItem.markup_percent / 100),
+            miscellaneous: selectedItem, // For display
+          })
+        }
+        setTravelDistanceDialogOpen(false)
+        return
+      }
+
+      // Non-edit mode: direct API calls (original behavior)
       if (existingLine) {
         // Update existing line item quantity
         await api.quotes.updateLine(quoteId, existingLine.id, {
