@@ -1648,7 +1648,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     type: LineItemType,
     icon: React.ReactNode,
     addButtonLabel: string,
-    extraButtons?: React.ReactNode
+    extraButtons?: React.ReactNode,
+    useEffectivePricing?: boolean  // For Labour section PMS % support
   ) => (
     <Card>
       <CardHeader className="pb-3">
@@ -1766,6 +1767,10 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <span className="font-medium">{getLineItemDescription(item)}</span>
+                        {/* PMS percentage indicator for labour items */}
+                        {item.is_pms && item.pms_percent != null && (
+                          <span className="text-xs text-muted-foreground">({item.pms_percent}%)</span>
+                        )}
                         {isEdited && !isDeleted && (
                           <Badge variant="outline" className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 border-blue-300">
                             Edited
@@ -1847,7 +1852,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       {editedItem?.unit_price !== undefined && editedItem.unit_price !== getLineItemUnitPrice(item) ? (
                         <span className="font-bold text-blue-600 dark:text-blue-400">${editedItem.unit_price.toFixed(2)}</span>
                       ) : (
-                        `$${getLineItemUnitPrice(item).toFixed(2)}`
+                        `$${(useEffectivePricing ? getEffectiveUnitPrice(item) : getLineItemUnitPrice(item)).toFixed(2)}`
                       )}
                     </TableCell>
                     <TableCell className="text-center">
@@ -1861,18 +1866,25 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      {item.discount_code ? (
-                        <div>
-                          <span className="line-through text-muted-foreground text-sm">
-                            ${getLineItemSubtotal(item).toFixed(2)}
-                          </span>
-                          <span className="ml-2 font-medium text-green-600 dark:text-green-400">
-                            ${getLineItemTotal(item).toFixed(2)}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="font-medium">${getLineItemTotal(item).toFixed(2)}</span>
-                      )}
+                      {(() => {
+                        const unitPrice = useEffectivePricing ? getEffectiveUnitPrice(item) : getLineItemUnitPrice(item)
+                        const subtotal = unitPrice * item.quantity
+                        const total = item.discount_code
+                          ? subtotal * (1 - item.discount_code.discount_percent / 100)
+                          : subtotal
+                        return item.discount_code ? (
+                          <div>
+                            <span className="line-through text-muted-foreground text-sm">
+                              ${subtotal.toFixed(2)}
+                            </span>
+                            <span className="ml-2 font-medium text-green-600 dark:text-green-400">
+                              ${total.toFixed(2)}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="font-medium">${total.toFixed(2)}</span>
+                        )
+                      })()}
                     </TableCell>
                     <TableCell className="text-right space-x-1">
                       {/* Edit Mode: Edit, Undo edit, Undo delete, Delete buttons */}
@@ -2011,13 +2023,13 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               <TableFooter>
                 <TableRow className="bg-muted/50">
                   <TableCell className="font-semibold">Section Total</TableCell>
-                  <TableCell className="text-right font-semibold">{calculateSectionTotals(items).qtyOrdered}</TableCell>
-                  <TableCell className="text-right font-semibold">{calculateSectionTotals(items).qtyPending}</TableCell>
-                  <TableCell className="text-right font-semibold">{calculateSectionTotals(items).qtyFulfilled}</TableCell>
+                  <TableCell className="text-right font-semibold">{calculateSectionTotals(items, useEffectivePricing).qtyOrdered}</TableCell>
+                  <TableCell className="text-right font-semibold">{calculateSectionTotals(items, useEffectivePricing).qtyPending}</TableCell>
+                  <TableCell className="text-right font-semibold">{calculateSectionTotals(items, useEffectivePricing).qtyFulfilled}</TableCell>
                   <TableCell className="text-right font-semibold">
-                    {calculateSectionTotals(items).qtyFulfilled > 0 ? (
+                    {calculateSectionTotals(items, useEffectivePricing).qtyFulfilled > 0 ? (
                       <span className="text-green-600 dark:text-green-400">
-                        ${calculateSectionTotals(items).fulfilledValue.toFixed(2)}
+                        ${calculateSectionTotals(items, useEffectivePricing).fulfilledValue.toFixed(2)}
                       </span>
                     ) : (
                       <span className="text-muted-foreground">-</span>
@@ -2025,7 +2037,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                   </TableCell>
                   <TableCell></TableCell>
                   <TableCell></TableCell>
-                  <TableCell className="text-right font-bold">${calculateSectionTotals(items).total.toFixed(2)}</TableCell>
+                  <TableCell className="text-right font-bold">${calculateSectionTotals(items, useEffectivePricing).total.toFixed(2)}</TableCell>
                   <TableCell></TableCell>
                 </TableRow>
                 {calculateStagedSectionTotals(items).itemCount > 0 && (
@@ -2278,310 +2290,38 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       {/* Parts Section */}
       {renderLineItemSection("Parts", partItems, "part", <Package className="h-4 w-4" />, "Add Part")}
 
-      {/* Labor Section - Custom render with PMS buttons */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-4">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Wrench className="h-4 w-4" />
-                Labour
-              </CardTitle>
-              {laborItems2.length > 0 && <StackedProgress items={laborItems2} />}
-            </div>
-            <div className="flex gap-2">
-              {/* Invoicing buttons - only visible in Invoicing mode */}
-              {editorMode === "invoicing" && (
-                <>
-                  {getSectionButtonState(laborItems2) === 'clear' ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleClearAllStaged("labor")}
-                      className="text-green-600 dark:text-green-400 border-green-300 dark:border-green-700 hover:bg-green-50 dark:hover:bg-green-950"
-                    >
-                      <X className="h-4 w-4 mr-1" />
-                      Clear All Staged
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleFulfillAll("labor")}
-                      disabled={getSectionButtonState(laborItems2) === 'disabled'}
-                    >
-                      <ClipboardCheck className="h-4 w-4 mr-1" />
-                      Fulfill All
-                    </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleOpenBulkStageDialog("labor")}
-                    disabled={!laborItems2.some(item => item.qty_pending > 0)}
-                    title="Stage percentage of pending quantities"
-                  >
-                    <Percent className="h-4 w-4 mr-1" />
-                    Stage %
-                  </Button>
-                </>
-              )}
-              {/* Edit buttons - only visible in Edit mode */}
-              {editorMode === "edit" && (
-                <>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleOpenDiscountAll("labor")}
-                    disabled={quote?.markup_control_enabled || laborItems2.length === 0 || hasBeenInvoiced}
-                  >
-                    <Tag className="h-4 w-4 mr-1" />
-                    Discount All
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => openPmsDialog("dollar")}
-                    disabled={hasBeenInvoiced}
-                    className="gap-2"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Add PMS $
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => openPmsDialog("percent")}
-                    disabled={hasBeenInvoiced}
-                    className="gap-2"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Add PMS %
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => openAddDialog("labor")}
-                    disabled={hasBeenInvoiced}
-                    className="gap-2"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Add Labour
-                  </Button>
-                </>
-              )}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {laborItems2.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">
-              No labour items yet.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Description</TableHead>
-                  <TableHead className="text-right">Qty Ordered</TableHead>
-                  <TableHead className="text-right">Qty Pending</TableHead>
-                  <TableHead className="text-right">Qty Fulfilled</TableHead>
-                  <TableHead className="text-right">Fulfilled Price</TableHead>
-                  <TableHead className="text-right">Unit Price</TableHead>
-                  <TableHead className="text-center">Discount</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {laborItems2.map((item) => {
-                  const staged = stagedFulfillments.get(item.id)
-                  const effectivePrice = getEffectiveUnitPrice(item)
-                  const effectiveSubtotal = effectivePrice * item.quantity
-                  const effectiveTotal = item.discount_code
-                    ? effectiveSubtotal * (1 - item.discount_code.discount_percent / 100)
-                    : effectiveSubtotal
-                  return (
-                    <TableRow key={item.id} className={`${staged ? "border-l-4 border-l-green-500 dark:border-l-green-400" : ""} ${item.qty_pending === 0 ? "opacity-50" : ""}`}>
-                      <TableCell>
-                        <div>
-                          <span className="font-medium">{getLineItemDescription(item)}</span>
-                          {item.is_pms && item.pms_percent != null && (
-                            <span className="text-xs text-muted-foreground ml-1">({item.pms_percent}%)</span>
-                          )}
-                          {staged && (
-                            <Badge variant="outline" className="ml-2 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 border-green-300 dark:border-green-700">
-                              Staged: {staged}
-                            </Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">{item.quantity}</TableCell>
-                      <TableCell className="text-right">
-                        {/* Only interactive in Invoicing mode */}
-                        {editorMode === "invoicing" && editingLineItemId === item.id ? (
-                          <Input
-                            type="number"
-                            step="1"
-                            min="0"
-                            max={item.qty_pending}
-                            value={editingValue}
-                            onChange={(e) => setEditingValue(e.target.value)}
-                            onBlur={() => handleInlineEditComplete(item)}
-                            onKeyDown={(e) => handleInlineEditKeyDown(e, item)}
-                            className="w-20 h-8 text-right"
-                            autoFocus
-                          />
-                        ) : editorMode === "invoicing" ? (
-                          <button
-                            onClick={() => startEditing(item)}
-                            disabled={item.qty_pending === 0}
-                            className={`px-2 py-1 rounded transition-colors ${
-                              item.qty_pending === 0
-                                ? "text-muted-foreground cursor-not-allowed"
-                                : staged
-                                ? "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-800"
-                                : "hover:bg-muted cursor-pointer"
-                            }`}
-                            title={item.qty_pending > 0 ? "Click to stage for fulfillment" : "Fully fulfilled"}
-                          >
-                            {item.qty_pending}
-                          </button>
-                        ) : (
-                          <span className={staged ? "text-green-700 dark:text-green-300 font-medium" : ""}>
-                            {item.qty_pending}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <span className={item.qty_fulfilled > 0 ? "text-green-600 dark:text-green-400 font-medium" : "text-muted-foreground"}>
-                          {item.qty_fulfilled}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {item.qty_fulfilled > 0 ? (
-                          <span className="text-green-600 dark:text-green-400 font-medium">
-                            ${getFulfilledLineItemValue(item).toFixed(2)}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        ${effectivePrice.toFixed(2)}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        {item.discount_code ? (
-                          <Badge variant="outline" className="gap-1">
-                            <Tag className="h-3 w-3" />
-                            {item.discount_code.code} (-{item.discount_code.discount_percent}%)
-                          </Badge>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {item.discount_code ? (
-                          <div>
-                            <span className="line-through text-muted-foreground text-sm">
-                              ${effectiveSubtotal.toFixed(2)}
-                            </span>
-                            <span className="ml-2 font-medium text-green-600 dark:text-green-400">
-                              ${effectiveTotal.toFixed(2)}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="font-medium">${effectiveTotal.toFixed(2)}</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right space-x-1">
-                        {/* Edit Mode: Edit and Delete buttons */}
-                        {editorMode === "edit" && (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openEditDialog(item)}
-                              disabled={hasBeenInvoiced}
-                              title={hasBeenInvoiced ? "Quote is frozen" : "Edit"}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => stageDelete(item.id)}
-                              disabled={hasBeenInvoiced}
-                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                              title={hasBeenInvoiced ? "Quote is frozen" : "Mark for deletion"}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </>
-                        )}
-                        {/* Invoicing Mode: Clear staged button */}
-                        {editorMode === "invoicing" && staged && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => clearStagedFulfillment(item.id)}
-                            title="Clear staged"
-                            className="text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300"
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-              {laborItems2.length > 0 && (
-                <TableFooter>
-                  <TableRow className="bg-muted/50">
-                    <TableCell className="font-semibold">Section Total</TableCell>
-                    <TableCell className="text-right font-semibold">{calculateSectionTotals(laborItems2, true).qtyOrdered}</TableCell>
-                    <TableCell className="text-right font-semibold">{calculateSectionTotals(laborItems2, true).qtyPending}</TableCell>
-                    <TableCell className="text-right font-semibold">{calculateSectionTotals(laborItems2, true).qtyFulfilled}</TableCell>
-                    <TableCell className="text-right font-semibold">
-                      {calculateSectionTotals(laborItems2, true).qtyFulfilled > 0 ? (
-                        <span className="text-green-600 dark:text-green-400">
-                          ${calculateSectionTotals(laborItems2, true).fulfilledValue.toFixed(2)}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell></TableCell>
-                    <TableCell></TableCell>
-                    <TableCell className="text-right font-bold">${calculateSectionTotals(laborItems2, true).total.toFixed(2)}</TableCell>
-                    <TableCell></TableCell>
-                  </TableRow>
-                  {calculateStagedSectionTotals(laborItems2).itemCount > 0 && (
-                    <TableRow className="bg-green-50/50 dark:bg-green-950/50 border-t-2 border-green-200 dark:border-green-800">
-                      <TableCell className="font-semibold text-green-700 dark:text-green-300">
-                        Staging for Invoice
-                      </TableCell>
-                      <TableCell></TableCell>
-                      <TableCell className="text-right font-semibold text-green-700 dark:text-green-300">
-                        {calculateStagedSectionTotals(laborItems2).stagedQty}
-                      </TableCell>
-                      <TableCell></TableCell>
-                      <TableCell></TableCell>
-                      <TableCell></TableCell>
-                      <TableCell></TableCell>
-                      <TableCell className="text-right font-bold text-green-700 dark:text-green-300">
-                        ${calculateStagedSectionTotals(laborItems2).stagedTotal.toFixed(2)}
-                      </TableCell>
-                      <TableCell></TableCell>
-                    </TableRow>
-                  )}
-                </TableFooter>
-              )}
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      {/* Labor Section */}
+      {renderLineItemSection(
+        "Labour",
+        laborItems2,
+        "labor",
+        <Wrench className="h-4 w-4" />,
+        "Add Labour",
+        // Extra buttons for PMS
+        <>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => openPmsDialog("dollar")}
+            disabled={hasBeenInvoiced}
+            className="gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            Add PMS $
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => openPmsDialog("percent")}
+            disabled={hasBeenInvoiced}
+            className="gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            Add PMS %
+          </Button>
+        </>,
+        true  // useEffectivePricing for PMS % items
+      )}
 
       {/* Misc Section */}
       {renderLineItemSection("Miscellaneous", miscItems2, "misc", <FileText className="h-4 w-4" />, "Add Misc", (
