@@ -505,8 +505,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
   const enterEditMode = () => {
     if (hasBeenInvoiced) return // Cannot edit frozen quotes
-    if (stagedFulfillments.size > 0) {
-      alert("Please complete or clear your invoice staging before entering Edit mode.")
+    if (editorMode === "invoicing") {
+      alert("Please complete or cancel invoice staging before entering Edit mode.")
       return
     }
     setEditorMode("edit")
@@ -523,6 +523,26 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     setStagedDeletes(new Set())
     setEditorMode("view")
     setDiscardConfirmOpen(false)
+  }
+
+  // ===== Invoice Staging Mode Handlers =====
+  const enterInvoicingMode = () => {
+    if (editorMode === "edit") {
+      alert("Please commit or discard edit changes before entering Invoice mode.")
+      return
+    }
+    setEditorMode("invoicing")
+  }
+
+  const exitInvoicingMode = (confirm = false) => {
+    if (confirm && stagedFulfillments.size > 0) {
+      // Proceed to create invoice confirmation
+      setConfirmDialogOpen(true)
+    } else {
+      // Cancel - clear staged fulfillments and return to view
+      setStagedFulfillments(new Map())
+      setEditorMode("view")
+    }
   }
 
   const stageEdit = (item: QuoteLineItem, changes: Partial<Omit<StagedEdit, "originalItem">>) => {
@@ -984,6 +1004,172 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       }, 0)
   }
 
+  // ===== Projected Calculations (for Edit Mode comparison) =====
+  // These include staged changes: adds, edits, deletes
+
+  const calculateProjectedTotal = (): number => {
+    if (!quote) return 0
+
+    // Start with existing items, excluding deleted ones
+    let projectedItems: { unitPrice: number; quantity: number; discountPercent: number; isPms: boolean; pmsPercent?: number }[] = []
+
+    for (const item of quote.line_items) {
+      if (stagedDeletes.has(item.id)) continue // Skip deleted items
+
+      const editedItem = stagedEdits.get(item.id)
+      const quantity = editedItem?.quantity ?? item.quantity
+      const unitPrice = editedItem?.unit_price ?? getLineItemUnitPrice(item)
+      const discountPercent = item.discount_code?.discount_percent ?? 0
+
+      projectedItems.push({
+        unitPrice,
+        quantity,
+        discountPercent,
+        isPms: item.is_pms,
+        pmsPercent: item.pms_percent ?? undefined,
+      })
+    }
+
+    // Add staged adds
+    for (const add of stagedAdds) {
+      let unitPrice = add.unit_price ?? 0
+      if (!add.unit_price) {
+        if (add.labor) unitPrice = add.labor.hours * add.labor.rate * (1 + (add.labor.markup_percent / 100))
+        else if (add.part) unitPrice = add.part.cost * (1 + (add.part.markup_percent / 100))
+        else if (add.miscellaneous) unitPrice = add.miscellaneous.unit_price * (1 + (add.miscellaneous.markup_percent / 100))
+      }
+      projectedItems.push({
+        unitPrice,
+        quantity: add.quantity,
+        discountPercent: add.discount_code?.discount_percent ?? 0,
+        isPms: add.is_pms ?? false,
+        pmsPercent: add.pms_percent ?? undefined,
+      })
+    }
+
+    // Calculate non-PMS total first
+    const nonPmsTotal = projectedItems
+      .filter(item => !item.isPms)
+      .reduce((sum, item) => {
+        let subtotal = item.unitPrice * item.quantity
+        if (item.discountPercent > 0) {
+          subtotal = subtotal * (1 - item.discountPercent / 100)
+        }
+        return sum + subtotal
+      }, 0)
+
+    // Calculate PMS total
+    const pmsTotal = projectedItems
+      .filter(item => item.isPms)
+      .reduce((sum, item) => {
+        if (item.pmsPercent != null) {
+          const unitPrice = nonPmsTotal * item.pmsPercent / 100
+          let subtotal = unitPrice * item.quantity
+          if (item.discountPercent > 0) {
+            subtotal = subtotal * (1 - item.discountPercent / 100)
+          }
+          return sum + subtotal
+        }
+        let subtotal = item.unitPrice * item.quantity
+        if (item.discountPercent > 0) {
+          subtotal = subtotal * (1 - item.discountPercent / 100)
+        }
+        return sum + subtotal
+      }, 0)
+
+    return nonPmsTotal + pmsTotal
+  }
+
+  const calculateProjectedMarkup = (): number => {
+    if (!quote) return 0
+
+    let totalWeightedMarkup = 0
+    let totalBaseCost = 0
+
+    // Existing items (excluding deleted)
+    for (const item of quote.line_items) {
+      if (stagedDeletes.has(item.id)) continue
+
+      const editedItem = stagedEdits.get(item.id)
+      const quantity = editedItem?.quantity ?? item.quantity
+
+      let baseCost = 0
+      let markupPercent = 0
+
+      if (item.part) {
+        baseCost = item.part.cost
+        markupPercent = item.part.markup_percent ?? 0
+      } else if (item.labor) {
+        baseCost = item.labor.hours * item.labor.rate
+        markupPercent = item.labor.markup_percent
+      } else if (item.miscellaneous) {
+        baseCost = item.miscellaneous.unit_price
+        markupPercent = item.miscellaneous.markup_percent
+      }
+
+      if (item.is_pms) markupPercent = 0
+
+      const weightedCost = baseCost * quantity
+      totalWeightedMarkup += markupPercent * weightedCost
+      totalBaseCost += weightedCost
+    }
+
+    // Staged adds
+    for (const add of stagedAdds) {
+      let baseCost = 0
+      let markupPercent = 0
+
+      if (add.part) {
+        baseCost = add.part.cost
+        markupPercent = add.part.markup_percent ?? 0
+      } else if (add.labor) {
+        baseCost = add.labor.hours * add.labor.rate
+        markupPercent = add.labor.markup_percent
+      } else if (add.miscellaneous) {
+        baseCost = add.miscellaneous.unit_price
+        markupPercent = add.miscellaneous.markup_percent
+      }
+
+      if (add.is_pms) markupPercent = 0
+
+      const weightedCost = baseCost * add.quantity
+      totalWeightedMarkup += markupPercent * weightedCost
+      totalBaseCost += weightedCost
+    }
+
+    return totalBaseCost > 0 ? totalWeightedMarkup / totalBaseCost : 0
+  }
+
+  const calculateProjectedMargin = (): number => {
+    if (!quote) return 0
+
+    const projectedSellingPrice = calculateProjectedTotal()
+    if (projectedSellingPrice === 0) return 0
+
+    let totalManufacturingCost = 0
+
+    // Existing items (excluding deleted)
+    for (const item of quote.line_items) {
+      if (stagedDeletes.has(item.id)) continue
+
+      const editedItem = stagedEdits.get(item.id)
+      const quantity = editedItem?.quantity ?? item.quantity
+
+      if (item.part) {
+        totalManufacturingCost += item.part.cost * quantity
+      }
+    }
+
+    // Staged adds
+    for (const add of stagedAdds) {
+      if (add.part) {
+        totalManufacturingCost += add.part.cost * add.quantity
+      }
+    }
+
+    return ((projectedSellingPrice - totalManufacturingCost) / projectedSellingPrice) * 100
+  }
+
   // Calculate section totals for display
   const calculateSectionTotals = (items: QuoteLineItem[], useEffectiveTotal = false) => {
     return {
@@ -1302,8 +1488,9 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
       await api.quotes.createInvoice(quoteId, invoiceData)
 
-      // Clear staged fulfillments and refresh
+      // Clear staged fulfillments, exit invoicing mode, and refresh
       setStagedFulfillments(new Map())
+      setEditorMode("view")
       fetchQuote()
       onUpdate?.()
     } catch (err) {
@@ -1474,8 +1661,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
             {items.length > 0 && <StackedProgress items={items} />}
           </div>
           <div className="flex gap-2">
-            {/* Invoicing buttons - only enabled when NOT in edit mode */}
-            {editorMode !== "edit" && (
+            {/* Invoicing buttons - only visible in Invoicing mode */}
+            {editorMode === "invoicing" && (
               <>
                 {getSectionButtonState(items) === 'clear' ? (
                   <Button
@@ -1510,33 +1697,38 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                 </Button>
               </>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleOpenDiscountAll(type)}
-              disabled={quote?.markup_control_enabled || items.length === 0 || hasBeenInvoiced || editorMode !== "edit"}
-              title={hasBeenInvoiced ? "Quote is frozen" : editorMode !== "edit" ? "Enter Edit Mode first" : "Apply discount to all items"}
-            >
-              <Tag className="h-4 w-4 mr-1" />
-              Discount All
-            </Button>
-            {extraButtons}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => openAddDialog(type)}
-              disabled={hasBeenInvoiced || editorMode !== "edit"}
-              className="gap-2"
-              title={hasBeenInvoiced ? "Quote is frozen" : editorMode !== "edit" ? "Enter Edit Mode to add items" : `Add ${addButtonLabel}`}
-            >
-              <Plus className="h-4 w-4" />
-              {addButtonLabel}
-            </Button>
+            {/* Edit buttons - only visible in Edit mode */}
+            {editorMode === "edit" && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleOpenDiscountAll(type)}
+                  disabled={quote?.markup_control_enabled || items.length === 0 || hasBeenInvoiced}
+                  title={hasBeenInvoiced ? "Quote is frozen" : "Apply discount to all items"}
+                >
+                  <Tag className="h-4 w-4 mr-1" />
+                  Discount All
+                </Button>
+                {extraButtons}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openAddDialog(type)}
+                  disabled={hasBeenInvoiced}
+                  className="gap-2"
+                  title={hasBeenInvoiced ? "Quote is frozen" : `Add ${addButtonLabel}`}
+                >
+                  <Plus className="h-4 w-4" />
+                  {addButtonLabel}
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </CardHeader>
       <CardContent>
-        {items.length === 0 ? (
+        {items.length === 0 && stagedAdds.filter(add => add.item_type === type).length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-4">
             No {title.toLowerCase()} items yet.
           </p>
@@ -1560,12 +1752,13 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                 const staged = stagedFulfillments.get(item.id)
                 const isDeleted = stagedDeletes.has(item.id)
                 const isEdited = stagedEdits.has(item.id)
+                const editedItem = stagedEdits.get(item.id)
                 return (
                   <TableRow
                     key={item.id}
                     className={`
                       ${staged ? "border-l-4 border-l-green-500 dark:border-l-green-400" : ""}
-                      ${isEdited && !isDeleted ? "border-l-4 border-l-blue-500 dark:border-l-blue-400 bg-blue-50/50 dark:bg-blue-950/50" : ""}
+                      ${isEdited && !isDeleted ? "border-l-4 border-l-blue-500 dark:border-l-blue-400" : ""}
                       ${isDeleted ? "border-l-4 border-l-red-500 dark:border-l-red-400 bg-red-50/50 dark:bg-red-950/50 line-through opacity-60" : ""}
                       ${item.qty_pending === 0 && !isDeleted ? "opacity-50" : ""}
                     `}
@@ -1593,9 +1786,16 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="text-right">{item.quantity}</TableCell>
                     <TableCell className="text-right">
-                      {editingLineItemId === item.id ? (
+                      {editedItem?.quantity !== undefined && editedItem.quantity !== item.quantity ? (
+                        <span className="font-bold text-blue-600 dark:text-blue-400">{editedItem.quantity}</span>
+                      ) : (
+                        item.quantity
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {/* Only interactive in Invoicing mode */}
+                      {editorMode === "invoicing" && editingLineItemId === item.id ? (
                         <Input
                           type="number"
                           step="1"
@@ -1608,7 +1808,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                           className="w-20 h-8 text-right"
                           autoFocus
                         />
-                      ) : (
+                      ) : editorMode === "invoicing" ? (
                         <button
                           onClick={() => startEditing(item)}
                           disabled={item.qty_pending === 0}
@@ -1623,6 +1823,10 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                         >
                           {item.qty_pending}
                         </button>
+                      ) : (
+                        <span className={staged ? "text-green-700 dark:text-green-300 font-medium" : ""}>
+                          {item.qty_pending}
+                        </span>
                       )}
                     </TableCell>
                     <TableCell className="text-right">
@@ -1640,7 +1844,11 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      ${getLineItemUnitPrice(item).toFixed(2)}
+                      {editedItem?.unit_price !== undefined && editedItem.unit_price !== getLineItemUnitPrice(item) ? (
+                        <span className="font-bold text-blue-600 dark:text-blue-400">${editedItem.unit_price.toFixed(2)}</span>
+                      ) : (
+                        `$${getLineItemUnitPrice(item).toFixed(2)}`
+                      )}
                     </TableCell>
                     <TableCell className="text-center">
                       {item.discount_code ? (
@@ -1667,18 +1875,64 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       )}
                     </TableCell>
                     <TableCell className="text-right space-x-1">
-                      {/* Edit button - disabled when frozen, enabled in edit mode */}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openEditDialog(item)}
-                        disabled={hasBeenInvoiced || (editorMode !== "edit" && editorMode !== "view") || isDeleted}
-                        title={hasBeenInvoiced ? "Quote is frozen" : isDeleted ? "Item marked for deletion" : "Edit"}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      {/* Clear staged fulfillment - only in invoicing mode */}
-                      {staged && editorMode !== "edit" && (
+                      {/* Edit Mode: Edit, Undo edit, Undo delete, Delete buttons */}
+                      {editorMode === "edit" && (
+                        <>
+                          {/* Edit button */}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openEditDialog(item)}
+                            disabled={hasBeenInvoiced || isDeleted}
+                            title={hasBeenInvoiced ? "Quote is frozen" : isDeleted ? "Item marked for deletion" : "Edit"}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          {/* Undo staged edit */}
+                          {isEdited && !isDeleted && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                const newEdits = new Map(stagedEdits)
+                                newEdits.delete(item.id)
+                                setStagedEdits(newEdits)
+                              }}
+                              title="Undo edit"
+                              className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {/* Undo delete */}
+                          {isDeleted && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => unstageDelete(item.id)}
+                              title="Undo delete"
+                              className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {/* Delete button */}
+                          {!isDeleted && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => stageDelete(item.id)}
+                              disabled={hasBeenInvoiced}
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              title={hasBeenInvoiced ? "Quote is frozen" : "Mark for deletion"}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </>
+                      )}
+                      {/* Invoicing Mode: Clear staged button */}
+                      {editorMode === "invoicing" && staged && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -1689,45 +1943,63 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                           <X className="h-4 w-4" />
                         </Button>
                       )}
-                      {/* Undo staged edit - in edit mode when item is edited */}
-                      {isEdited && !isDeleted && editorMode === "edit" && (
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+              {/* Staged Add Items - shown inline with green highlighting */}
+              {stagedAdds.filter(add => add.item_type === type).map((add) => {
+                const getAddDescription = () => {
+                  if (add.description) return add.description
+                  if (add.item_type === "labor" && add.labor) return add.labor.description
+                  if (add.item_type === "part" && add.part) return add.part.part_number
+                  if (add.item_type === "misc" && add.miscellaneous) return add.miscellaneous.description
+                  return "New item"
+                }
+                const getAddUnitPrice = () => {
+                  if (add.unit_price !== undefined) return add.unit_price
+                  if (add.item_type === "labor" && add.labor) return add.labor.hours * add.labor.rate * (1 + (add.labor.markup_percent / 100))
+                  if (add.item_type === "part" && add.part) return add.part.cost * (1 + (add.part.markup_percent / 100))
+                  if (add.item_type === "misc" && add.miscellaneous) return add.miscellaneous.unit_price * (1 + (add.miscellaneous.markup_percent / 100))
+                  return 0
+                }
+                const unitPrice = getAddUnitPrice()
+                const total = unitPrice * add.quantity
+                return (
+                  <TableRow
+                    key={`staged-add-${add.tempId}`}
+                    className="border-l-4 border-l-green-500 dark:border-l-green-400 bg-green-50/50 dark:bg-green-950/50"
+                  >
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-green-700 dark:text-green-300">{getAddDescription()}</span>
+                        <Badge variant="outline" className="text-xs bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 border-green-300">
+                          + New
+                        </Badge>
+                        {add.item_type === "part" && add.part && (
+                          <span className="text-muted-foreground ml-2">- {add.part.description}</span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right text-green-700 dark:text-green-300 font-medium">{add.quantity}</TableCell>
+                    <TableCell className="text-right text-muted-foreground">-</TableCell>
+                    <TableCell className="text-right text-muted-foreground">-</TableCell>
+                    <TableCell className="text-right text-muted-foreground">-</TableCell>
+                    <TableCell className="text-right text-green-700 dark:text-green-300 font-medium">${unitPrice.toFixed(2)}</TableCell>
+                    <TableCell className="text-center text-muted-foreground">-</TableCell>
+                    <TableCell className="text-right text-green-700 dark:text-green-300 font-bold">${total.toFixed(2)}</TableCell>
+                    <TableCell className="text-right">
+                      {editorMode === "edit" && (
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            const newEdits = new Map(stagedEdits)
-                            newEdits.delete(item.id)
-                            setStagedEdits(newEdits)
+                            setStagedAdds(prev => prev.filter(a => a.tempId !== add.tempId))
                           }}
-                          title="Undo edit"
-                          className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+                          title="Remove staged add"
+                          className="text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300"
                         >
                           <X className="h-4 w-4" />
-                        </Button>
-                      )}
-                      {/* Undo delete - in edit mode when item is staged for delete */}
-                      {isDeleted && editorMode === "edit" && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => unstageDelete(item.id)}
-                          title="Undo delete"
-                          className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      )}
-                      {/* Delete button - stages delete in edit mode, direct delete otherwise */}
-                      {!isDeleted && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => editorMode === "edit" ? stageDelete(item.id) : handleDeleteLine(item.id)}
-                          disabled={hasBeenInvoiced || (editorMode !== "edit" && editorMode !== "view")}
-                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                          title={hasBeenInvoiced ? "Quote is frozen" : editorMode === "edit" ? "Mark for deletion" : "Delete"}
-                        >
-                          <Trash2 className="h-4 w-4" />
                         </Button>
                       )}
                     </TableCell>
@@ -1735,7 +2007,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                 )
               })}
             </TableBody>
-            {items.length > 0 && (
+            {(items.length > 0 || stagedAdds.filter(add => add.item_type === type).length > 0) && (
               <TableFooter>
                 <TableRow className="bg-muted/50">
                   <TableCell className="font-semibold">Section Total</TableCell>
@@ -1784,7 +2056,10 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   )
 
   return (
-    <div className="p-6 space-y-6 pb-24">
+    <div className={`p-6 space-y-6 pb-24 ${
+      editorMode === "edit" ? "ring-2 ring-blue-500 ring-offset-2 rounded-lg" :
+      editorMode === "invoicing" ? "ring-2 ring-green-500 ring-offset-2 rounded-lg" : ""
+    }`}>
       {/* Frozen Banner */}
       {hasBeenInvoiced && (
         <Card className="border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950">
@@ -1793,37 +2068,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               <Lock className="h-4 w-4" />
               <span className="font-medium">Quote Frozen</span>
               <span className="text-sm">— This quote has been invoiced. You can create additional invoices but cannot modify line items.</span>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Edit Mode Banner */}
-      {editorMode === "edit" && (
-        <Card className="border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950">
-          <CardContent className="py-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
-                <Pencil className="h-4 w-4" />
-                <span className="font-medium">Edit Mode</span>
-                <span className="text-sm">— Changes are staged until you commit them.</span>
-              </div>
-              <div className="flex items-center gap-2">
-                {hasStagedChanges && (
-                  <Badge variant="secondary" className="bg-blue-100 dark:bg-blue-900">
-                    {stagedChangesCount} change{stagedChangesCount !== 1 ? "s" : ""} staged
-                  </Badge>
-                )}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => exitEditMode()}
-                  className="text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900"
-                >
-                  <X className="h-4 w-4 mr-1" />
-                  Exit Edit Mode
-                </Button>
-              </div>
             </div>
           </CardContent>
         </Card>
@@ -1838,20 +2082,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Edit Quote Button - only shown when not frozen and in view mode */}
-          {!hasBeenInvoiced && editorMode === "view" && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={enterEditMode}
-              disabled={stagedFulfillments.size > 0}
-              className="gap-2"
-              title={stagedFulfillments.size > 0 ? "Clear invoice staging first" : "Enter Edit Mode to modify line items"}
-            >
-              <Pencil className="h-4 w-4" />
-              Edit Quote
-            </Button>
-          )}
           <Button
             variant="outline"
             size="sm"
@@ -1916,9 +2146,12 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               ) : (
                 <span className="text-muted-foreground italic">Not set</span>
               )}
-              <Button size="sm" variant="ghost" onClick={() => setIsEditingClientPo(true)}>
-                <Pencil className="h-4 w-4" />
-              </Button>
+              {/* Edit button only visible in Edit mode */}
+              {editorMode === "edit" && (
+                <Button size="sm" variant="ghost" onClick={() => setIsEditingClientPo(true)}>
+                  <Pencil className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           )}
           {!quote.client_po_number && (
@@ -1973,9 +2206,12 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               ) : (
                 <span className="text-muted-foreground italic">Not set</span>
               )}
-              <Button size="sm" variant="ghost" onClick={() => setIsEditingWorkDescription(true)}>
-                <Pencil className="h-4 w-4" />
-              </Button>
+              {/* Edit button only visible in Edit mode */}
+              {editorMode === "edit" && (
+                <Button size="sm" variant="ghost" onClick={() => setIsEditingWorkDescription(true)}>
+                  <Pencil className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           )}
         </CardContent>
@@ -1990,24 +2226,40 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               Markup Discount Control
             </CardTitle>
             <div className="flex items-center gap-3">
+              {/* Display current state */}
               {quote.markup_control_enabled && quote.global_markup_percent !== null && (
-                <button
-                  onClick={handleOpenEditMarkup}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors cursor-pointer"
-                  title="Click to edit global markup"
-                >
-                  Global Markup: {quote.global_markup_percent}%
-                  <Pencil className="h-3 w-3" />
-                </button>
+                editorMode === "edit" ? (
+                  <button
+                    onClick={handleOpenEditMarkup}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors cursor-pointer"
+                    title="Click to edit global markup"
+                  >
+                    Global Markup: {quote.global_markup_percent}%
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                ) : (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700">
+                    Global Markup: {quote.global_markup_percent}%
+                  </span>
+                )
               )}
-              <Button
-                size="sm"
-                variant={quote.markup_control_enabled ? "default" : "outline"}
-                onClick={handleToggleMarkupControl}
-                disabled={togglingMarkupControl}
-              >
-                {togglingMarkupControl ? "..." : (quote.markup_control_enabled ? "Enabled" : "Disabled")}
-              </Button>
+              {/* Toggle button only visible in Edit mode */}
+              {editorMode === "edit" && (
+                <Button
+                  size="sm"
+                  variant={quote.markup_control_enabled ? "default" : "outline"}
+                  onClick={handleToggleMarkupControl}
+                  disabled={togglingMarkupControl}
+                >
+                  {togglingMarkupControl ? "..." : (quote.markup_control_enabled ? "Enabled" : "Disabled")}
+                </Button>
+              )}
+              {/* Read-only badge in View mode */}
+              {editorMode !== "edit" && (
+                <Badge variant={quote.markup_control_enabled ? "default" : "secondary"}>
+                  {quote.markup_control_enabled ? "Enabled" : "Disabled"}
+                </Badge>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -2035,73 +2287,86 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               {laborItems2.length > 0 && <StackedProgress items={laborItems2} />}
             </div>
             <div className="flex gap-2">
-              {getSectionButtonState(laborItems2) === 'clear' ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleClearAllStaged("labor")}
-                  className="text-green-600 dark:text-green-400 border-green-300 dark:border-green-700 hover:bg-green-50 dark:hover:bg-green-950"
-                >
-                  <X className="h-4 w-4 mr-1" />
-                  Clear All Staged
-                </Button>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleFulfillAll("labor")}
-                  disabled={getSectionButtonState(laborItems2) === 'disabled'}
-                >
-                  <ClipboardCheck className="h-4 w-4 mr-1" />
-                  Fulfill All
-                </Button>
+              {/* Invoicing buttons - only visible in Invoicing mode */}
+              {editorMode === "invoicing" && (
+                <>
+                  {getSectionButtonState(laborItems2) === 'clear' ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleClearAllStaged("labor")}
+                      className="text-green-600 dark:text-green-400 border-green-300 dark:border-green-700 hover:bg-green-50 dark:hover:bg-green-950"
+                    >
+                      <X className="h-4 w-4 mr-1" />
+                      Clear All Staged
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleFulfillAll("labor")}
+                      disabled={getSectionButtonState(laborItems2) === 'disabled'}
+                    >
+                      <ClipboardCheck className="h-4 w-4 mr-1" />
+                      Fulfill All
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleOpenBulkStageDialog("labor")}
+                    disabled={!laborItems2.some(item => item.qty_pending > 0)}
+                    title="Stage percentage of pending quantities"
+                  >
+                    <Percent className="h-4 w-4 mr-1" />
+                    Stage %
+                  </Button>
+                </>
               )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleOpenBulkStageDialog("labor")}
-                disabled={!laborItems2.some(item => item.qty_pending > 0)}
-                title="Stage percentage of pending quantities"
-              >
-                <Percent className="h-4 w-4 mr-1" />
-                Stage %
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleOpenDiscountAll("labor")}
-                disabled={quote?.markup_control_enabled || laborItems2.length === 0}
-              >
-                <Tag className="h-4 w-4 mr-1" />
-                Discount All
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => openPmsDialog("dollar")}
-                className="gap-2"
-              >
-                <Plus className="h-4 w-4" />
-                Add PMS $
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => openPmsDialog("percent")}
-                className="gap-2"
-              >
-                <Plus className="h-4 w-4" />
-                Add PMS %
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => openAddDialog("labor")}
-                className="gap-2"
-              >
-                <Plus className="h-4 w-4" />
-                Add Labour
-              </Button>
+              {/* Edit buttons - only visible in Edit mode */}
+              {editorMode === "edit" && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleOpenDiscountAll("labor")}
+                    disabled={quote?.markup_control_enabled || laborItems2.length === 0 || hasBeenInvoiced}
+                  >
+                    <Tag className="h-4 w-4 mr-1" />
+                    Discount All
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openPmsDialog("dollar")}
+                    disabled={hasBeenInvoiced}
+                    className="gap-2"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add PMS $
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openPmsDialog("percent")}
+                    disabled={hasBeenInvoiced}
+                    className="gap-2"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add PMS %
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openAddDialog("labor")}
+                    disabled={hasBeenInvoiced}
+                    className="gap-2"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add Labour
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -2150,7 +2415,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       </TableCell>
                       <TableCell className="text-right">{item.quantity}</TableCell>
                       <TableCell className="text-right">
-                        {editingLineItemId === item.id ? (
+                        {/* Only interactive in Invoicing mode */}
+                        {editorMode === "invoicing" && editingLineItemId === item.id ? (
                           <Input
                             type="number"
                             step="1"
@@ -2163,7 +2429,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                             className="w-20 h-8 text-right"
                             autoFocus
                           />
-                        ) : (
+                        ) : editorMode === "invoicing" ? (
                           <button
                             onClick={() => startEditing(item)}
                             disabled={item.qty_pending === 0}
@@ -2178,6 +2444,10 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                           >
                             {item.qty_pending}
                           </button>
+                        ) : (
+                          <span className={staged ? "text-green-700 dark:text-green-300 font-medium" : ""}>
+                            {item.qty_pending}
+                          </span>
                         )}
                       </TableCell>
                       <TableCell className="text-right">
@@ -2222,15 +2492,32 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                         )}
                       </TableCell>
                       <TableCell className="text-right space-x-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openEditDialog(item)}
-                          title="Edit"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        {staged && (
+                        {/* Edit Mode: Edit and Delete buttons */}
+                        {editorMode === "edit" && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openEditDialog(item)}
+                              disabled={hasBeenInvoiced}
+                              title={hasBeenInvoiced ? "Quote is frozen" : "Edit"}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => stageDelete(item.id)}
+                              disabled={hasBeenInvoiced}
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              title={hasBeenInvoiced ? "Quote is frozen" : "Mark for deletion"}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </>
+                        )}
+                        {/* Invoicing Mode: Clear staged button */}
+                        {editorMode === "invoicing" && staged && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -2241,15 +2528,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                             <X className="h-4 w-4" />
                           </Button>
                         )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDeleteLine(item.id)}
-                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                          title="Delete"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
                       </TableCell>
                     </TableRow>
                   )
@@ -2309,7 +2587,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
             variant="outline"
             size="sm"
             onClick={handleCalculateAndAddParking}
-            disabled={addingParking}
+            disabled={addingParking || hasBeenInvoiced}
             className="gap-2"
           >
             <Car className="h-4 w-4" />
@@ -2319,6 +2597,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
             variant="outline"
             size="sm"
             onClick={handleOpenTravelDistanceDialog}
+            disabled={hasBeenInvoiced}
             className="gap-2"
           >
             <MapPin className="h-4 w-4" />
@@ -2351,7 +2630,15 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                   </Tooltip>
                 </TooltipProvider>
               </div>
-              <span className="text-lg font-semibold">{calculateAverageMarkup().toFixed(2)}%</span>
+              {hasStagedChanges ? (
+                <span className="text-lg font-semibold">
+                  {calculateAverageMarkup().toFixed(2)}%
+                  <span className="text-muted-foreground mx-1">→</span>
+                  <span className="text-blue-600 dark:text-blue-400">{calculateProjectedMarkup().toFixed(2)}%</span>
+                </span>
+              ) : (
+                <span className="text-lg font-semibold">{calculateAverageMarkup().toFixed(2)}%</span>
+              )}
             </div>
 
             {/* Total Margin with formula tooltip */}
@@ -2374,7 +2661,15 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                   </Tooltip>
                 </TooltipProvider>
               </div>
-              <span className="text-lg font-semibold">{calculateTotalMargin().toFixed(2)}%</span>
+              {hasStagedChanges ? (
+                <span className="text-lg font-semibold">
+                  {calculateTotalMargin().toFixed(2)}%
+                  <span className="text-muted-foreground mx-1">→</span>
+                  <span className="text-blue-600 dark:text-blue-400">{calculateProjectedMargin().toFixed(2)}%</span>
+                </span>
+              ) : (
+                <span className="text-lg font-semibold">{calculateTotalMargin().toFixed(2)}%</span>
+              )}
             </div>
 
             <Separator />
@@ -2382,7 +2677,15 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
             {/* Quote Total (existing) */}
             <div className="flex justify-between items-center">
               <span className="text-lg font-semibold">Quote Total:</span>
-              <span className="text-2xl font-bold">${calculateTotal().toFixed(2)}</span>
+              {hasStagedChanges ? (
+                <span className="text-2xl font-bold">
+                  ${calculateTotal().toFixed(2)}
+                  <span className="text-muted-foreground mx-1 text-lg">→</span>
+                  <span className="text-blue-600 dark:text-blue-400">${calculateProjectedTotal().toFixed(2)}</span>
+                </span>
+              ) : (
+                <span className="text-2xl font-bold">${calculateTotal().toFixed(2)}</span>
+              )}
             </div>
           </div>
         </CardContent>
@@ -2398,8 +2701,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         }}
       />
 
-      {/* Floating Staging Summary Card */}
-      {stagedFulfillments.size > 0 && (
+      {/* Floating Staging Summary Card - only show in Invoicing mode with staged items */}
+      {editorMode === "invoicing" && stagedFulfillments.size > 0 && (
         <Card className="fixed bottom-24 right-6 w-80 shadow-lg border-green-200 dark:border-green-800 bg-card z-50">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
@@ -2450,112 +2753,102 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         </Card>
       )}
 
-      {/* Floating Invoice Button - only show when NOT in edit mode */}
-      {editorMode !== "edit" && (
-        <div className="fixed bottom-6 right-6 z-50">
-          <div className="flex flex-col items-end gap-2">
-            {!quote.client_po_number && stagedCount > 0 && (
-              <span className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-950 dark:text-amber-400 px-3 py-1 rounded-md shadow-sm">
-                Client PO Number required
-              </span>
-            )}
-            <div className="flex gap-2">
-              {stagedCount > 0 && (
+      {/* Unified Floating Button Group */}
+      <div className="fixed bottom-6 right-6 z-50">
+        <div className="flex flex-col items-end gap-2">
+          {/* Warning messages */}
+          {editorMode === "invoicing" && !quote.client_po_number && stagedFulfillments.size > 0 && (
+            <span className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-950 dark:text-amber-400 px-3 py-1 rounded-md shadow-sm">
+              Client PO Number required
+            </span>
+          )}
+
+          <div className="flex gap-2">
+            {/* View Mode: Edit Quote and Create Invoice buttons */}
+            {editorMode === "view" && !hasBeenInvoiced && (
+              <>
                 <Button
                   size="lg"
                   variant="outline"
-                  onClick={() => setPreviewModalOpen(true)}
+                  onClick={enterEditMode}
                   className="shadow-lg gap-2"
                 >
-                  <FileText className="h-5 w-5" />
-                  Preview
+                  <Pencil className="h-5 w-5" />
+                  Edit Quote
                 </Button>
-              )}
+                <Button
+                  size="lg"
+                  onClick={enterInvoicingMode}
+                  className="shadow-lg gap-2"
+                >
+                  <Receipt className="h-5 w-5" />
+                  Create Invoice
+                </Button>
+              </>
+            )}
+
+            {/* View Mode (Frozen): Only Create Invoice button */}
+            {editorMode === "view" && hasBeenInvoiced && (
               <Button
                 size="lg"
-                onClick={() => setConfirmDialogOpen(true)}
-                disabled={stagedCount === 0 || isCreatingInvoice || !quote.client_po_number}
+                onClick={enterInvoicingMode}
                 className="shadow-lg gap-2"
               >
                 <Receipt className="h-5 w-5" />
-                {isCreatingInvoice ? "Creating..." : `Create Invoice${stagedCount > 0 ? ` (${stagedCount} items)` : ""}`}
+                Create Invoice
               </Button>
-            </div>
-          </div>
-        </div>
-      )}
+            )}
 
-      {/* Floating Edit Summary Card - only show in edit mode with staged changes */}
-      {editorMode === "edit" && hasStagedChanges && (
-        <Card className="fixed bottom-24 left-6 w-80 shadow-lg border-blue-200 dark:border-blue-800 bg-card z-50">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Pencil className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-              Pending Changes
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            {stagedAdds.length > 0 && (
-              <div className="flex justify-between">
-                <span className="text-green-600 dark:text-green-400">Added</span>
-                <span className="font-medium">{stagedAdds.length} item{stagedAdds.length !== 1 ? "s" : ""}</span>
-              </div>
-            )}
-            {stagedEdits.size > 0 && (
-              <div className="flex justify-between">
-                <span className="text-blue-600 dark:text-blue-400">Modified</span>
-                <span className="font-medium">{stagedEdits.size} item{stagedEdits.size !== 1 ? "s" : ""}</span>
-              </div>
-            )}
-            {stagedDeletes.size > 0 && (
-              <div className="flex justify-between">
-                <span className="text-red-600 dark:text-red-400">Deleted</span>
-                <span className="font-medium">{stagedDeletes.size} item{stagedDeletes.size !== 1 ? "s" : ""}</span>
-              </div>
-            )}
-            <Separator />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setDiscardConfirmOpen(true)}
-              className="w-full text-destructive hover:text-destructive"
-            >
-              <X className="h-4 w-4 mr-1" />
-              Discard All Changes
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Floating Commit Button - only show in edit mode */}
-      {editorMode === "edit" && (
-        <div className="fixed bottom-6 right-6 z-50">
-          <div className="flex flex-col items-end gap-2">
-            <div className="flex gap-2">
-              {hasStagedChanges && (
+            {/* Edit Mode: Discard and Commit buttons */}
+            {editorMode === "edit" && (
+              <>
                 <Button
                   size="lg"
                   variant="outline"
-                  onClick={() => setEditPreviewOpen(true)}
+                  onClick={() => exitEditMode()}
                   className="shadow-lg gap-2"
                 >
-                  <Eye className="h-5 w-5" />
-                  Preview Changes
+                  <X className="h-5 w-5" />
+                  Discard
                 </Button>
-              )}
-              <Button
-                size="lg"
-                onClick={() => setCommitConfirmOpen(true)}
-                disabled={!hasStagedChanges || isCommitting}
-                className="shadow-lg gap-2 bg-blue-600 hover:bg-blue-700"
-              >
-                <GitCommit className="h-5 w-5" />
-                {isCommitting ? "Committing..." : `Commit Changes${hasStagedChanges ? ` (${stagedChangesCount})` : ""}`}
-              </Button>
-            </div>
+                <Button
+                  size="lg"
+                  onClick={() => setCommitConfirmOpen(true)}
+                  disabled={!hasStagedChanges || isCommitting}
+                  className="shadow-lg gap-2 bg-blue-600 hover:bg-blue-700"
+                >
+                  <GitCommit className="h-5 w-5" />
+                  {isCommitting ? "Committing..." : `Commit${hasStagedChanges ? ` (${stagedChangesCount})` : ""}`}
+                </Button>
+              </>
+            )}
+
+            {/* Invoicing Mode: Cancel and Confirm Invoice buttons */}
+            {editorMode === "invoicing" && (
+              <>
+                <Button
+                  size="lg"
+                  variant="outline"
+                  onClick={() => exitInvoicingMode(false)}
+                  className="shadow-lg gap-2"
+                >
+                  <X className="h-5 w-5" />
+                  Cancel
+                </Button>
+                <Button
+                  size="lg"
+                  onClick={() => exitInvoicingMode(true)}
+                  disabled={stagedFulfillments.size === 0 || isCreatingInvoice || !quote.client_po_number}
+                  className="shadow-lg gap-2 bg-green-600 hover:bg-green-700"
+                >
+                  <Receipt className="h-5 w-5" />
+                  {isCreatingInvoice ? "Creating..." : `Confirm Invoice${stagedFulfillments.size > 0 ? ` (${stagedFulfillments.size})` : ""}`}
+                </Button>
+              </>
+            )}
           </div>
         </div>
-      )}
+      </div>
 
       {/* Add Line Item Dialog */}
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
@@ -2627,11 +2920,13 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               <div className="space-y-2">
                 <Label>Miscellaneous Item</Label>
                 <SearchableSelect<Miscellaneous>
-                  options={miscItems.map((misc): SearchableSelectOption => ({
-                    value: misc.id.toString(),
-                    label: misc.description,
-                    description: `$${(misc.unit_price * (1 + misc.markup_percent / 100)).toFixed(2)}`,
-                  }))}
+                  options={miscItems
+                    .filter(misc => !misc.is_system_item) // Exclude system items (Parking, Travel Distance)
+                    .map((misc): SearchableSelectOption => ({
+                      value: misc.id.toString(),
+                      label: misc.description,
+                      description: `$${(misc.unit_price * (1 + misc.markup_percent / 100)).toFixed(2)}`,
+                    }))}
                   value={selectedMiscId}
                   onChange={setSelectedMiscId}
                   placeholder="Select misc item"
