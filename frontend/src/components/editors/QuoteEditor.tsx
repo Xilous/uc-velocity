@@ -2056,9 +2056,12 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   )
 
   return (
-    <div className={`p-6 space-y-6 pb-24 ${
-      editorMode === "edit" ? "ring-2 ring-blue-500 ring-offset-2 rounded-lg" :
-      editorMode === "invoicing" ? "ring-2 ring-green-500 ring-offset-2 rounded-lg" : ""
+    <div className={`p-6 space-y-6 pb-24 rounded-lg transition-colors ${
+      editorMode === "edit"
+        ? "border-2 border-blue-500 dark:border-blue-400 bg-blue-50/30 dark:bg-blue-950/30"
+        : editorMode === "invoicing"
+        ? "border-2 border-green-500 dark:border-green-400 bg-green-50/30 dark:bg-green-950/30"
+        : "border-2 border-transparent"
     }`}>
       {/* Frozen Banner */}
       {hasBeenInvoiced && (
