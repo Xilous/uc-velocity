@@ -35,6 +35,7 @@ import {
   Search,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Toaster } from "@/components/ui/toaster"
 
 type AppView = "profiles" | "projects" | "project-details" | "inventory" | "discount-codes"
 
@@ -665,6 +666,8 @@ function App() {
           />
         </DialogContent>
       </Dialog>
+
+      <Toaster />
     </div>
   )
 }

@@ -99,7 +99,7 @@ class Labor(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     description = Column(String, nullable=False)
-    hours = Column(Float, nullable=False, default=1.0)
+    hours = Column(Integer, nullable=False, default=1)  # Must be whole number
     rate = Column(Float, nullable=False)
     markup_percent = Column(Float, default=0.0)
     category_id = Column(Integer, ForeignKey('categories.id'))
@@ -185,10 +185,10 @@ class QuoteLineItem(Base):
     misc_id = Column(Integer, ForeignKey('miscellaneous.id'), nullable=True)
     discount_code_id = Column(Integer, ForeignKey('discount_codes.id'), nullable=True)
     description = Column(String)  # For misc items or override
-    quantity = Column(Float, default=1.0)  # Qty Ordered
+    quantity = Column(Integer, default=1)  # Qty Ordered (must be whole number)
     unit_price = Column(Float)  # Override price if needed
-    qty_pending = Column(Float, default=0.0)  # Remaining to fulfill
-    qty_fulfilled = Column(Float, default=0.0)  # Total fulfilled across all invoices
+    qty_pending = Column(Integer, default=0)  # Remaining to fulfill (must be whole number)
+    qty_fulfilled = Column(Integer, default=0)  # Total fulfilled across all invoices (must be whole number)
     is_pms = Column(Boolean, default=False)  # True for PMS items (Project Management Services)
     pms_percent = Column(Float, nullable=True)  # Percentage value for PMS % items (null for PMS $ or non-PMS)
     original_markup_percent = Column(Float, nullable=True)  # Individual markup before global override
@@ -225,7 +225,7 @@ class POLineItem(Base):
     item_type = Column(String, nullable=False)  # "part" or "misc" (NO labor for POs)
     part_id = Column(Integer, ForeignKey('parts.id'), nullable=True)
     description = Column(String)  # For misc items or override
-    quantity = Column(Float, default=1.0)
+    quantity = Column(Integer, default=1)  # Must be whole number
     unit_price = Column(Float)
 
     # Relationships
@@ -262,10 +262,10 @@ class InvoiceLineItem(Base):
     item_type = Column(String, nullable=False)
     description = Column(String)
     unit_price = Column(Float)
-    qty_ordered = Column(Float)  # Original ordered quantity
-    qty_fulfilled_this_invoice = Column(Float)  # Amount fulfilled in THIS invoice
-    qty_fulfilled_total = Column(Float)  # Total fulfilled up to this point
-    qty_pending_after = Column(Float)  # Pending after this invoice
+    qty_ordered = Column(Integer)  # Original ordered quantity (must be whole number)
+    qty_fulfilled_this_invoice = Column(Integer)  # Amount fulfilled in THIS invoice (must be whole number)
+    qty_fulfilled_total = Column(Integer)  # Total fulfilled up to this point (must be whole number)
+    qty_pending_after = Column(Integer)  # Pending after this invoice (must be whole number)
 
     # Foreign keys for reference data
     labor_id = Column(Integer)
@@ -309,10 +309,10 @@ class QuoteLineItemSnapshot(Base):
     misc_id = Column(Integer)
     discount_code_id = Column(Integer)
     description = Column(String)
-    quantity = Column(Float)  # qty_ordered
+    quantity = Column(Integer)  # qty_ordered (must be whole number)
     unit_price = Column(Float)
-    qty_pending = Column(Float)
-    qty_fulfilled = Column(Float)
+    qty_pending = Column(Integer)  # Must be whole number
+    qty_fulfilled = Column(Integer)  # Must be whole number
     is_deleted = Column(Boolean, default=False)  # Track if item was deleted at this snapshot
     is_pms = Column(Boolean, default=False)  # True for PMS items (Project Management Services)
     pms_percent = Column(Float, nullable=True)  # Percentage value for PMS % items

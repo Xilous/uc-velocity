@@ -40,12 +40,6 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
 import { SearchableSelect } from "@/components/ui/searchable-select"
 import type { SearchableSelectOption } from "@/components/ui/searchable-select"
 import { api } from "@/api/client"
@@ -55,12 +49,13 @@ import type {
   StagedFulfillment, InvoiceCreate, QuoteEditorMode, StagedEdit, StagedAdd,
   StagedLineItemChange, CommitEditsRequest
 } from "@/types"
-import { Plus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info, Copy, Car, MapPin, X, Lock, GitCommit, Eye, AlertTriangle } from "lucide-react"
+import { Plus, Minus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info, Copy, Car, MapPin, X, Lock, GitCommit, Eye, AlertTriangle, Check, CheckCircle2 } from "lucide-react"
 import { QuoteAuditTrail } from "./QuoteAuditTrail"
 import { PartForm } from "@/components/forms/PartForm"
 import { LaborForm } from "@/components/forms/LaborForm"
 import { MiscForm } from "@/components/forms/MiscForm"
 import { DiscountCodeForm } from "@/components/forms/DiscountCodeForm"
+import { toast } from "@/hooks/use-toast"
 
 interface QuoteEditorProps {
   quoteId: number
@@ -105,14 +100,10 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   // Staged fulfillments (session only - not persisted until invoice created)
   const [stagedFulfillments, setStagedFulfillments] = useState<Map<number, number>>(new Map())
 
-  // Inline editing state for staging
-  const [editingLineItemId, setEditingLineItemId] = useState<number | null>(null)
-  const [editingValue, setEditingValue] = useState<string>("")
-
-  // Bulk stage by percentage dialog
-  const [bulkStageDialogOpen, setBulkStageDialogOpen] = useState(false)
-  const [bulkStageSection, setBulkStageSection] = useState<LineItemType | null>(null)
-  const [bulkStagePercent, setBulkStagePercent] = useState<string>("50")
+  // Stepper input values for each line item (separate from staged fulfillments for validation)
+  const [stepperValues, setStepperValues] = useState<Map<number, string>>(new Map())
+  // Validation errors for stepper inputs
+  const [stepperErrors, setStepperErrors] = useState<Map<number, string>>(new Map())
 
   // Invoice preview modal
   const [previewModalOpen, setPreviewModalOpen] = useState(false)
@@ -166,6 +157,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
   // ===== Edit Mode State (Issue #8: Commit-based workflow) =====
   const [editorMode, setEditorMode] = useState<QuoteEditorMode>("view")
+  const [clientPoMissingDialogOpen, setClientPoMissingDialogOpen] = useState(false)
   const [stagedEdits, setStagedEdits] = useState<Map<number, StagedEdit>>(new Map())
   const [stagedAdds, setStagedAdds] = useState<StagedAdd[]>([])
   const [stagedDeletes, setStagedDeletes] = useState<Set<number>>(new Set())
@@ -174,6 +166,12 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false)
   const [editPreviewOpen, setEditPreviewOpen] = useState(false)
   const [commitConfirmOpen, setCommitConfirmOpen] = useState(false)
+  const [noPendingDialogOpen, setNoPendingDialogOpen] = useState(false)
+
+  // Quote version tracking for Flow 7E - detect external changes during invoicing or editing
+  const [initialQuoteVersion, setInitialQuoteVersion] = useState<number | null>(null)
+  const [editModeStartVersion, setEditModeStartVersion] = useState<number | null>(null)
+  const [quoteChangedDialogOpen, setQuoteChangedDialogOpen] = useState(false)
 
   // Computed: Is quote frozen (has been invoiced)?
   const hasBeenInvoiced = quote?.line_items.some(item => item.qty_fulfilled > 0) ?? false
@@ -184,11 +182,30 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   // Computed: Total count of staged changes
   const stagedChangesCount = stagedEdits.size + stagedAdds.length + stagedDeletes.size
 
+  // Computed: Does any line item have qty_pending > 0? (Flow 1 precondition)
+  const hasAnyPendingQuantity = quote?.line_items.some(item => item.qty_pending > 0) ?? false
+
   const fetchQuote = async () => {
     setLoading(true)
     setError(null)
     try {
       const data = await api.quotes.get(quoteId)
+
+      // Flow 7E: Detect external changes during invoicing or edit mode
+      if (editorMode === "invoicing" && initialQuoteVersion !== null && data.current_version !== initialQuoteVersion) {
+        // Quote was modified externally - clear staging and warn user
+        clearInvoicingState()
+        setQuoteChangedDialogOpen(true)
+        // Update the version to the new value so subsequent fetches don't re-trigger
+        setInitialQuoteVersion(data.current_version)
+      } else if (editorMode === "edit" && editModeStartVersion !== null && data.current_version !== editModeStartVersion) {
+        // Quote was modified externally while editing - clear staging and warn user
+        clearEditModeState()
+        setQuoteChangedDialogOpen(true)
+        // Update the version to the new value so subsequent fetches don't re-trigger
+        setEditModeStartVersion(data.current_version)
+      }
+
       setQuote(data)
       setClientPoNumber(data.client_po_number || "")
       setWorkDescription(data.work_description || "")
@@ -220,6 +237,29 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     fetchQuote()
     fetchResources()
   }, [quoteId])
+
+  // Computed: Are there staged invoicing changes?
+  const hasStagedInvoicing = editorMode === "invoicing" && stagedFulfillments.size > 0
+
+  // Computed: Are there any unsaved changes (invoicing OR edit mode)?
+  const hasAnyUnsavedChanges = hasStagedInvoicing || (editorMode === "edit" && hasStagedChanges)
+
+  // Navigation guard: Warn when leaving with staged quantities or edit mode changes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasAnyUnsavedChanges) {
+        e.preventDefault()
+        e.returnValue = "You have unsaved changes that will be lost. Are you sure you want to leave?"
+        return e.returnValue
+      }
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+    }
+  }, [hasAnyUnsavedChanges])
 
   const openAddDialog = (type: LineItemType) => {
     setAddDialogType(type)
@@ -509,6 +549,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       alert("Please complete or cancel invoice staging before entering Edit mode.")
       return
     }
+    // Store the quote's current_version for Flow 7E change detection
+    setEditModeStartVersion(quote?.current_version ?? null)
     setEditorMode("edit")
   }
 
@@ -517,10 +559,11 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       setDiscardConfirmOpen(true)
       return
     }
-    // Clear all staged changes
+    // Clear all staged changes and timestamp
     setStagedEdits(new Map())
     setStagedAdds([])
     setStagedDeletes(new Set())
+    setEditModeStartVersion(null)
     setEditorMode("view")
     setDiscardConfirmOpen(false)
   }
@@ -531,6 +574,18 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       alert("Please commit or discard edit changes before entering Invoice mode.")
       return
     }
+    // Guard: Client PO Number is required before entering invoicing mode
+    if (!quote?.client_po_number) {
+      setClientPoMissingDialogOpen(true)
+      return
+    }
+    // Guard: At least one item must have qty_pending > 0 (Flow 1 precondition)
+    if (!hasAnyPendingQuantity) {
+      setNoPendingDialogOpen(true)
+      return
+    }
+    // Store the quote's current_version for Flow 7E change detection
+    setInitialQuoteVersion(quote.current_version)
     setEditorMode("invoicing")
   }
 
@@ -539,10 +594,26 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       // Proceed to create invoice confirmation
       setConfirmDialogOpen(true)
     } else {
-      // Cancel - clear staged fulfillments and return to view
-      setStagedFulfillments(new Map())
+      // Cancel - clear staged fulfillments, stepper values/errors, and return to view
+      clearInvoicingState()
+      setInitialQuoteVersion(null)
       setEditorMode("view")
     }
+  }
+
+  // Helper to clear all invoicing staging state
+  const clearInvoicingState = () => {
+    setStagedFulfillments(new Map())
+    setStepperValues(new Map())
+    setStepperErrors(new Map())
+  }
+
+  // Helper to clear all edit mode staging state
+  const clearEditModeState = () => {
+    setStagedEdits(new Map())
+    setStagedAdds([])
+    setStagedDeletes(new Set())
+    setEditModeStartVersion(null)
   }
 
   const stageEdit = (item: QuoteLineItem, changes: Partial<Omit<StagedEdit, "originalItem">>) => {
@@ -607,6 +678,22 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     setCommitConfirmOpen(false)
 
     try {
+      // Pre-submit staleness check: fetch latest quote to detect external changes
+      if (editModeStartVersion !== null) {
+        const freshQuote = await api.quotes.get(quoteId)
+        if (freshQuote.current_version !== editModeStartVersion) {
+          // Quote was modified externally - clear staging, update state, and warn user
+          clearEditModeState()
+          setQuote(freshQuote)
+          setClientPoNumber(freshQuote.client_po_number || "")
+          setWorkDescription(freshQuote.work_description || "")
+          setEditModeStartVersion(freshQuote.current_version)
+          setQuoteChangedDialogOpen(true)
+          setIsCommitting(false)
+          return
+        }
+      }
+
       const changes: StagedLineItemChange[] = []
 
       // Add staged adds
@@ -1480,53 +1567,200 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     )
   }
 
-  // Inline editing handlers for staging
-  const startEditing = (item: QuoteLineItem) => {
-    if (item.qty_pending === 0) return // Can't edit fully fulfilled items
-    setEditingLineItemId(item.id)
-    // Pre-fill with staged value if exists, otherwise empty
-    const staged = stagedFulfillments.get(item.id)
-    setEditingValue(staged?.toString() || "")
-  }
-
-  const handleInlineEditComplete = (item: QuoteLineItem) => {
-    const qty = parseFloat(editingValue)
-    const newStaged = new Map(stagedFulfillments)
-
-    if (isNaN(qty) || qty <= 0) {
-      // Remove staged fulfillment if invalid or zero
-      newStaged.delete(item.id)
-    } else if (qty > item.qty_pending) {
-      // Cap at max pending
-      newStaged.set(item.id, item.qty_pending)
-    } else {
-      newStaged.set(item.id, qty)
-    }
-
-    setStagedFulfillments(newStaged)
-    setEditingLineItemId(null)
-    setEditingValue("")
-  }
-
-  const handleInlineEditCancel = () => {
-    setEditingLineItemId(null)
-    setEditingValue("")
-  }
-
-  const handleInlineEditKeyDown = (e: React.KeyboardEvent, item: QuoteLineItem) => {
-    if (e.key === "Enter") {
-      e.preventDefault()
-      handleInlineEditComplete(item)
-    } else if (e.key === "Escape") {
-      e.preventDefault()
-      handleInlineEditCancel()
-    }
-  }
-
   const clearStagedFulfillment = (itemId: number) => {
     const newStaged = new Map(stagedFulfillments)
     newStaged.delete(itemId)
     setStagedFulfillments(newStaged)
+    // Also clear stepper value and error
+    const newStepperValues = new Map(stepperValues)
+    newStepperValues.delete(itemId)
+    setStepperValues(newStepperValues)
+    const newStepperErrors = new Map(stepperErrors)
+    newStepperErrors.delete(itemId)
+    setStepperErrors(newStepperErrors)
+  }
+
+  // ===== Stepper Control Handlers =====
+
+  // Get the stepper input value for display (prioritize stepperValues, then staged, then empty)
+  const getStepperDisplayValue = (itemId: number): string => {
+    // If there's a stepper value being edited, show that
+    if (stepperValues.has(itemId)) {
+      return stepperValues.get(itemId) || ""
+    }
+    // Otherwise show staged value if exists
+    const staged = stagedFulfillments.get(itemId)
+    return staged ? staged.toString() : ""
+  }
+
+  // Validate and apply stepper input
+  const validateAndApplyStepperValue = (item: QuoteLineItem, value: string) => {
+    const newErrors = new Map(stepperErrors)
+    const newStaged = new Map(stagedFulfillments)
+    const newStepperValues = new Map(stepperValues)
+
+    // Clear any existing error first
+    newErrors.delete(item.id)
+
+    // Handle empty or zero - clear staging
+    if (value === "" || value === "0") {
+      newStaged.delete(item.id)
+      newStepperValues.delete(item.id)
+      setStagedFulfillments(newStaged)
+      setStepperValues(newStepperValues)
+      setStepperErrors(newErrors)
+      return
+    }
+
+    const parsed = parseFloat(value)
+
+    // Check for non-numeric or non-positive values
+    if (isNaN(parsed) || parsed <= 0) {
+      newErrors.set(item.id, "Must be a positive whole number")
+      newStepperValues.set(item.id, value) // Keep the invalid value for display
+      setStepperValues(newStepperValues)
+      setStepperErrors(newErrors)
+      return
+    }
+
+    // Check for decimal values (not integers)
+    if (!Number.isInteger(parsed)) {
+      newErrors.set(item.id, "Must be a positive whole number")
+      newStepperValues.set(item.id, value) // Keep the invalid value for display
+      setStepperValues(newStepperValues)
+      setStepperErrors(newErrors)
+      return
+    }
+
+    // Check if exceeds qty pending
+    if (parsed > item.qty_pending) {
+      newErrors.set(item.id, `Cannot exceed Qty Pending (${item.qty_pending})`)
+      newStepperValues.set(item.id, value) // Keep the invalid value for display
+      setStepperValues(newStepperValues)
+      setStepperErrors(newErrors)
+      return
+    }
+
+    // Valid value - apply staging
+    newStaged.set(item.id, parsed)
+    newStepperValues.delete(item.id) // Clear temp value since we're using staged
+    setStagedFulfillments(newStaged)
+    setStepperValues(newStepperValues)
+    setStepperErrors(newErrors)
+  }
+
+  // Handle stepper input change (just update display value, validate on blur)
+  const handleStepperInputChange = (item: QuoteLineItem, value: string) => {
+    const newStepperValues = new Map(stepperValues)
+    newStepperValues.set(item.id, value)
+    setStepperValues(newStepperValues)
+  }
+
+  // Handle stepper input blur - validate and apply
+  const handleStepperInputBlur = (item: QuoteLineItem) => {
+    const value = stepperValues.get(item.id)
+    if (value !== undefined) {
+      validateAndApplyStepperValue(item, value)
+    }
+  }
+
+  // Handle stepper input key down
+  const handleStepperKeyDown = (e: React.KeyboardEvent, item: QuoteLineItem) => {
+    if (e.key === "Enter") {
+      e.preventDefault()
+      const value = stepperValues.get(item.id) ?? getStepperDisplayValue(item.id)
+      validateAndApplyStepperValue(item, value)
+      ;(e.target as HTMLInputElement).blur()
+    } else if (e.key === "Escape") {
+      e.preventDefault()
+      // Clear temp value and error, revert to staged value
+      const newStepperValues = new Map(stepperValues)
+      newStepperValues.delete(item.id)
+      setStepperValues(newStepperValues)
+      const newStepperErrors = new Map(stepperErrors)
+      newStepperErrors.delete(item.id)
+      setStepperErrors(newStepperErrors)
+    }
+  }
+
+  // Increment stepper value
+  const handleStepperIncrement = (item: QuoteLineItem) => {
+    // Derive working value from in-progress stepperValues first, then fall back to stagedFulfillments
+    let currentValue = 0
+    if (stepperValues.has(item.id)) {
+      const typedValue = stepperValues.get(item.id) || ""
+      const parsed = parseFloat(typedValue)
+      // Use parsed value if valid positive number, capped between 0 and qty_pending
+      if (!isNaN(parsed) && parsed >= 0) {
+        currentValue = Math.min(Math.max(parsed, 0), item.qty_pending)
+      }
+    } else {
+      currentValue = stagedFulfillments.get(item.id) || 0
+    }
+
+    const newValue = Math.min(currentValue + 1, item.qty_pending)
+    if (newValue > 0) {
+      const newStaged = new Map(stagedFulfillments)
+      newStaged.set(item.id, newValue)
+      setStagedFulfillments(newStaged)
+      // Clear any error
+      const newErrors = new Map(stepperErrors)
+      newErrors.delete(item.id)
+      setStepperErrors(newErrors)
+      // Clear temp value
+      const newStepperValues = new Map(stepperValues)
+      newStepperValues.delete(item.id)
+      setStepperValues(newStepperValues)
+    }
+  }
+
+  // Decrement stepper value
+  const handleStepperDecrement = (item: QuoteLineItem) => {
+    // Derive working value from in-progress stepperValues first, then fall back to stagedFulfillments
+    let currentValue = 0
+    if (stepperValues.has(item.id)) {
+      const typedValue = stepperValues.get(item.id) || ""
+      const parsed = parseFloat(typedValue)
+      // Use parsed value if valid positive number, capped between 0 and qty_pending
+      if (!isNaN(parsed) && parsed >= 0) {
+        currentValue = Math.min(Math.max(parsed, 0), item.qty_pending)
+      }
+    } else {
+      currentValue = stagedFulfillments.get(item.id) || 0
+    }
+
+    const newValue = currentValue - 1
+    const newStaged = new Map(stagedFulfillments)
+    if (newValue <= 0) {
+      newStaged.delete(item.id)
+    } else {
+      newStaged.set(item.id, newValue)
+    }
+    setStagedFulfillments(newStaged)
+    // Clear any error
+    const newErrors = new Map(stepperErrors)
+    newErrors.delete(item.id)
+    setStepperErrors(newErrors)
+    // Clear temp value
+    const newStepperValues = new Map(stepperValues)
+    newStepperValues.delete(item.id)
+    setStepperValues(newStepperValues)
+  }
+
+  // Quick fulfill - set to max pending quantity
+  const handleQuickFulfill = (item: QuoteLineItem) => {
+    if (item.qty_pending <= 0) return
+    const newStaged = new Map(stagedFulfillments)
+    newStaged.set(item.id, Math.round(item.qty_pending))
+    setStagedFulfillments(newStaged)
+    // Clear any error
+    const newErrors = new Map(stepperErrors)
+    newErrors.delete(item.id)
+    setStepperErrors(newErrors)
+    // Clear temp value
+    const newStepperValues = new Map(stepperValues)
+    newStepperValues.delete(item.id)
+    setStepperValues(newStepperValues)
   }
 
   // Get total staged items count
@@ -1539,6 +1773,22 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     setIsCreatingInvoice(true)
     setConfirmDialogOpen(false) // Close confirmation dialog
     try {
+      // Pre-submit staleness check: fetch latest quote to detect external changes
+      if (initialQuoteVersion !== null) {
+        const freshQuote = await api.quotes.get(quoteId)
+        if (freshQuote.current_version !== initialQuoteVersion) {
+          // Quote was modified externally - clear staging, update state, and warn user
+          clearInvoicingState()
+          setQuote(freshQuote)
+          setClientPoNumber(freshQuote.client_po_number || "")
+          setWorkDescription(freshQuote.work_description || "")
+          setInitialQuoteVersion(freshQuote.current_version)
+          setQuoteChangedDialogOpen(true)
+          setIsCreatingInvoice(false)
+          return
+        }
+      }
+
       const fulfillments = Array.from(stagedFulfillments.entries()).map(([lineItemId, qty]) => ({
         line_item_id: lineItemId,
         quantity: qty
@@ -1551,8 +1801,17 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
       await api.quotes.createInvoice(quoteId, invoiceData)
 
-      // Clear staged fulfillments, exit invoicing mode, and refresh
+      // Show success toast
+      toast({
+        title: "Invoice created successfully",
+        description: "The invoice has been created and line items have been fulfilled.",
+      })
+
+      // Clear staged fulfillments, stepper values/errors, exit invoicing mode, and refresh
       setStagedFulfillments(new Map())
+      setStepperValues(new Map())
+      setStepperErrors(new Map())
+      setInitialQuoteVersion(null)
       setEditorMode("view")
       fetchQuote()
       onUpdate?.()
@@ -1574,11 +1833,19 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     if (itemsToFulfill.length === 0) return
 
     const newStagedFulfillments = new Map(stagedFulfillments)
+    const newStepperValues = new Map(stepperValues)
+    const newStepperErrors = new Map(stepperErrors)
+
     itemsToFulfill.forEach(item => {
-      newStagedFulfillments.set(item.id, item.qty_pending)
+      newStagedFulfillments.set(item.id, Math.round(item.qty_pending))
+      // Clear stepper temp values and errors
+      newStepperValues.delete(item.id)
+      newStepperErrors.delete(item.id)
     })
 
     setStagedFulfillments(newStagedFulfillments)
+    setStepperValues(newStepperValues)
+    setStepperErrors(newStepperErrors)
   }
 
   // Clear All Staged handler - clears all staged items in section
@@ -1586,11 +1853,20 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     if (!quote) return
 
     const newStaged = new Map(stagedFulfillments)
+    const newStepperValues = new Map(stepperValues)
+    const newStepperErrors = new Map(stepperErrors)
+
     quote.line_items
       .filter(item => item.item_type === itemType)
-      .forEach(item => newStaged.delete(item.id))
+      .forEach(item => {
+        newStaged.delete(item.id)
+        newStepperValues.delete(item.id)
+        newStepperErrors.delete(item.id)
+      })
 
     setStagedFulfillments(newStaged)
+    setStepperValues(newStepperValues)
+    setStepperErrors(newStepperErrors)
   }
 
   // Get button state for a section (fulfill, clear, or disabled)
@@ -1604,35 +1880,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     })
 
     return allFullyStaged ? 'clear' : 'fulfill'
-  }
-
-  // Open bulk stage dialog for a section
-  const handleOpenBulkStageDialog = (itemType: LineItemType) => {
-    setBulkStageSection(itemType)
-    setBulkStagePercent("50")
-    setBulkStageDialogOpen(true)
-  }
-
-  // Apply bulk stage by percentage
-  const handleBulkStageByPercent = () => {
-    if (!quote || !bulkStageSection) return
-
-    const percent = parseFloat(bulkStagePercent) / 100
-    if (isNaN(percent) || percent <= 0 || percent > 1) return
-
-    const newStaged = new Map(stagedFulfillments)
-
-    quote.line_items
-      .filter(item => item.item_type === bulkStageSection && item.qty_pending > 0)
-      .forEach(item => {
-        const stageQty = Math.round(item.qty_pending * percent * 100) / 100 // 2 decimal places
-        if (stageQty > 0) {
-          newStaged.set(item.id, stageQty)
-        }
-      })
-
-    setStagedFulfillments(newStaged)
-    setBulkStageDialogOpen(false)
   }
 
   // Discount All handlers
@@ -1749,16 +1996,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     Fulfill All
                   </Button>
                 )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleOpenBulkStageDialog(type)}
-                  disabled={!items.some(item => item.qty_pending > 0)}
-                  title="Stage percentage of pending quantities"
-                >
-                  <Percent className="h-4 w-4 mr-1" />
-                  Stage %
-                </Button>
               </>
             )}
             {/* Edit buttons - only visible in Edit mode */}
@@ -1803,10 +2040,26 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                 <TableHead>Description</TableHead>
                 <TableHead className="text-right">Qty Ordered</TableHead>
                 <TableHead className="text-right">Qty Pending</TableHead>
-                <TableHead className="text-right">Qty Fulfilled</TableHead>
-                <TableHead className="text-right">Fulfilled Price</TableHead>
+                {/* Qty to Fulfill column - only in invoicing mode */}
+                {editorMode === "invoicing" && (
+                  <TableHead className="text-right">Qty to Fulfill</TableHead>
+                )}
+                {/* Edit mode: Qty Fulfilled and Fulfilled Price come before Unit Price/Discount */}
+                {editorMode === "edit" && (
+                  <>
+                    <TableHead className="text-right">Qty Fulfilled</TableHead>
+                    <TableHead className="text-right">Fulfilled Price</TableHead>
+                  </>
+                )}
                 <TableHead className="text-right">Unit Price</TableHead>
                 <TableHead className="text-center">Discount</TableHead>
+                {/* Non-edit mode: Qty Fulfilled and Fulfilled Price come after Unit Price/Discount */}
+                {editorMode !== "edit" && (
+                  <>
+                    <TableHead className="text-right">Qty Fulfilled</TableHead>
+                    <TableHead className="text-right">Fulfilled Price</TableHead>
+                  </>
+                )}
                 <TableHead className="text-right">Total</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -1827,6 +2080,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       ${item.qty_pending === 0 && !isDeleted ? "opacity-50" : ""}
                     `}
                   >
+                    {/* Description Column */}
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <span className="font-medium">{getLineItemDescription(item)}</span>
@@ -1847,13 +2101,10 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                         {item.item_type === "part" && item.part && (
                           <span className="text-muted-foreground ml-2">- {item.part.description}</span>
                         )}
-                        {staged && (
-                          <Badge variant="outline" className="ml-2 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 border-green-300 dark:border-green-700">
-                            Staged: {staged}
-                          </Badge>
-                        )}
                       </div>
                     </TableCell>
+
+                    {/* Qty Ordered Column */}
                     <TableCell className="text-right">
                       {editedItem?.quantity !== undefined && editedItem.quantity !== item.quantity ? (
                         <span className="font-bold text-blue-600 dark:text-blue-400">{editedItem.quantity}</span>
@@ -1861,56 +2112,91 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                         item.quantity
                       )}
                     </TableCell>
+
+                    {/* Qty Pending Column - now read-only display */}
                     <TableCell className="text-right">
-                      {/* Only interactive in Invoicing mode */}
-                      {editorMode === "invoicing" && editingLineItemId === item.id ? (
-                        <Input
-                          type="number"
-                          step="1"
-                          min="0"
-                          max={item.qty_pending}
-                          value={editingValue}
-                          onChange={(e) => setEditingValue(e.target.value)}
-                          onBlur={() => handleInlineEditComplete(item)}
-                          onKeyDown={(e) => handleInlineEditKeyDown(e, item)}
-                          className="w-20 h-8 text-right"
-                          autoFocus
-                        />
-                      ) : editorMode === "invoicing" ? (
-                        <button
-                          onClick={() => startEditing(item)}
-                          disabled={item.qty_pending === 0}
-                          className={`px-2 py-1 rounded transition-colors ${
-                            item.qty_pending === 0
-                              ? "text-muted-foreground cursor-not-allowed"
-                              : staged
-                              ? "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-800"
-                              : "hover:bg-muted cursor-pointer"
-                          }`}
-                          title={item.qty_pending > 0 ? "Click to stage for fulfillment" : "Fully fulfilled"}
-                        >
-                          {item.qty_pending}
-                        </button>
-                      ) : (
-                        <span className={staged ? "text-green-700 dark:text-green-300 font-medium" : ""}>
-                          {item.qty_pending}
-                        </span>
-                      )}
+                      {item.qty_pending}
                     </TableCell>
-                    <TableCell className="text-right">
-                      <span className={item.qty_fulfilled > 0 ? "text-green-600 dark:text-green-400 font-medium" : "text-muted-foreground"}>
-                        {item.qty_fulfilled}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {item.qty_fulfilled > 0 ? (
-                        <span className="text-green-600 dark:text-green-400 font-medium">
-                          ${getFulfilledLineItemValue(item).toFixed(2)}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
+
+                    {/* Qty to Fulfill Column - only in invoicing mode */}
+                    {editorMode === "invoicing" && (
+                      <TableCell className="text-right">
+                        {item.qty_pending === 0 ? (
+                          // Fully fulfilled - show badge
+                          <Badge className="bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 border-green-300 dark:border-green-700 hover:bg-green-100">
+                            <CheckCircle2 className="h-3 w-3 mr-1" />
+                            Fully Fulfilled
+                          </Badge>
+                        ) : (
+                          // Stepper control
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 w-7 p-0"
+                              onClick={() => handleStepperDecrement(item)}
+                              disabled={!staged || staged <= 0}
+                              title="Decrease quantity"
+                            >
+                              <Minus className="h-3 w-3" />
+                            </Button>
+                            <Input
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              value={getStepperDisplayValue(item.id)}
+                              onChange={(e) => handleStepperInputChange(item, e.target.value)}
+                              onBlur={() => handleStepperInputBlur(item)}
+                              onKeyDown={(e) => handleStepperKeyDown(e, item)}
+                              placeholder="0"
+                              title={stepperErrors.get(item.id) || undefined}
+                              className={`w-16 h-7 text-center text-sm ${
+                                stepperErrors.has(item.id)
+                                  ? "border-red-500 bg-red-50 dark:bg-red-950 focus-visible:ring-red-500"
+                                  : staged
+                                  ? "border-green-500 bg-green-50 dark:bg-green-950 focus-visible:ring-green-500"
+                                  : ""
+                              }`}
+                            />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 w-7 p-0"
+                              onClick={() => handleStepperIncrement(item)}
+                              disabled={staged === item.qty_pending}
+                              title="Increase quantity"
+                            >
+                              <Plus className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        )}
+                      </TableCell>
+                    )}
+
+                    {/* Edit mode: Qty Fulfilled and Fulfilled Price come before Unit Price/Discount */}
+                    {editorMode === "edit" && (
+                      <>
+                        {/* Qty Fulfilled Column */}
+                        <TableCell className="text-right">
+                          <span className={item.qty_fulfilled > 0 ? "text-green-600 dark:text-green-400 font-medium" : "text-muted-foreground"}>
+                            {item.qty_fulfilled}
+                          </span>
+                        </TableCell>
+
+                        {/* Fulfilled Price Column */}
+                        <TableCell className="text-right">
+                          {item.qty_fulfilled > 0 ? (
+                            <span className="text-green-600 dark:text-green-400 font-medium">
+                              ${getFulfilledLineItemValue(item).toFixed(2)}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                      </>
+                    )}
+
+                    {/* Unit Price Column */}
                     <TableCell className="text-right">
                       {editedItem?.unit_price !== undefined && editedItem.unit_price !== getLineItemUnitPrice(item) ? (
                         <span className="font-bold text-blue-600 dark:text-blue-400">${editedItem.unit_price.toFixed(2)}</span>
@@ -1918,6 +2204,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                         `$${(useEffectivePricing ? getEffectiveUnitPrice(item) : getLineItemUnitPrice(item)).toFixed(2)}`
                       )}
                     </TableCell>
+
+                    {/* Discount Column */}
                     <TableCell className="text-center">
                       {item.discount_code ? (
                         <Badge variant="outline" className="gap-1">
@@ -1928,6 +2216,31 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                         <span className="text-muted-foreground">-</span>
                       )}
                     </TableCell>
+
+                    {/* Non-edit mode: Qty Fulfilled and Fulfilled Price come after Unit Price/Discount */}
+                    {editorMode !== "edit" && (
+                      <>
+                        {/* Qty Fulfilled Column */}
+                        <TableCell className="text-right">
+                          <span className={item.qty_fulfilled > 0 ? "text-green-600 dark:text-green-400 font-medium" : "text-muted-foreground"}>
+                            {item.qty_fulfilled}
+                          </span>
+                        </TableCell>
+
+                        {/* Fulfilled Price Column */}
+                        <TableCell className="text-right">
+                          {item.qty_fulfilled > 0 ? (
+                            <span className="text-green-600 dark:text-green-400 font-medium">
+                              ${getFulfilledLineItemValue(item).toFixed(2)}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                      </>
+                    )}
+
+                    {/* Total Column */}
                     <TableCell className="text-right">
                       {(() => {
                         const unitPrice = useEffectivePricing ? getEffectiveUnitPrice(item) : getLineItemUnitPrice(item)
@@ -2006,17 +2319,36 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                           )}
                         </>
                       )}
-                      {/* Invoicing Mode: Clear staged button */}
-                      {editorMode === "invoicing" && staged && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => clearStagedFulfillment(item.id)}
-                          title="Clear staged"
-                          className="text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
+                      {/* Invoicing Mode: Fulfill This Item button and Clear staged button */}
+                      {editorMode === "invoicing" && item.qty_pending > 0 && (
+                        <>
+                          {/* Fulfill This Item - quick action to stage full pending quantity */}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleQuickFulfill(item)}
+                            title="Fulfill all pending"
+                            className="h-7 w-7 p-0 border-green-300 dark:border-green-700 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950"
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          {/* Clear staged */}
+                          {staged && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => clearStagedFulfillment(item.id)}
+                              title="Clear staged"
+                              className="h-7 w-7 p-0 text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </>
+                      )}
+                      {/* Invoicing Mode: Fully fulfilled items show no actions */}
+                      {editorMode === "invoicing" && item.qty_pending === 0 && (
+                        <span className="text-muted-foreground">-</span>
                       )}
                     </TableCell>
                   </TableRow>
@@ -2045,6 +2377,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     key={`staged-add-${add.tempId}`}
                     className="border-l-4 border-l-green-500 dark:border-l-green-400 bg-green-50/50 dark:bg-green-950/50"
                   >
+                    {/* Description */}
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-green-700 dark:text-green-300">{getAddDescription()}</span>
@@ -2056,13 +2389,39 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                         )}
                       </div>
                     </TableCell>
+                    {/* Qty Ordered */}
                     <TableCell className="text-right text-green-700 dark:text-green-300 font-medium">{add.quantity}</TableCell>
+                    {/* Qty Pending */}
                     <TableCell className="text-right text-muted-foreground">-</TableCell>
-                    <TableCell className="text-right text-muted-foreground">-</TableCell>
-                    <TableCell className="text-right text-muted-foreground">-</TableCell>
+                    {/* Qty to Fulfill - only in invoicing mode */}
+                    {editorMode === "invoicing" && (
+                      <TableCell className="text-right text-muted-foreground">-</TableCell>
+                    )}
+                    {/* Edit mode: Qty Fulfilled and Fulfilled Price come before Unit Price/Discount */}
+                    {editorMode === "edit" && (
+                      <>
+                        {/* Qty Fulfilled */}
+                        <TableCell className="text-right text-muted-foreground">-</TableCell>
+                        {/* Fulfilled Price */}
+                        <TableCell className="text-right text-muted-foreground">-</TableCell>
+                      </>
+                    )}
+                    {/* Unit Price */}
                     <TableCell className="text-right text-green-700 dark:text-green-300 font-medium">${unitPrice.toFixed(2)}</TableCell>
+                    {/* Discount */}
                     <TableCell className="text-center text-muted-foreground">-</TableCell>
+                    {/* Non-edit mode: Qty Fulfilled and Fulfilled Price come after Unit Price/Discount */}
+                    {editorMode !== "edit" && (
+                      <>
+                        {/* Qty Fulfilled */}
+                        <TableCell className="text-right text-muted-foreground">-</TableCell>
+                        {/* Fulfilled Price */}
+                        <TableCell className="text-right text-muted-foreground">-</TableCell>
+                      </>
+                    )}
+                    {/* Total */}
                     <TableCell className="text-right text-green-700 dark:text-green-300 font-bold">${total.toFixed(2)}</TableCell>
+                    {/* Actions */}
                     <TableCell className="text-right">
                       {editorMode === "edit" && (
                         <Button
@@ -2085,40 +2444,89 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
             {(items.length > 0 || stagedAdds.filter(add => add.item_type === type).length > 0) && (
               <TableFooter>
                 <TableRow className="bg-muted/50">
+                  {/* Description */}
                   <TableCell className="font-semibold">Section Total</TableCell>
+                  {/* Qty Ordered */}
                   <TableCell className="text-right font-semibold">{calculateSectionTotals(items, useEffectivePricing).qtyOrdered}</TableCell>
+                  {/* Qty Pending */}
                   <TableCell className="text-right font-semibold">{calculateSectionTotals(items, useEffectivePricing).qtyPending}</TableCell>
-                  <TableCell className="text-right font-semibold">{calculateSectionTotals(items, useEffectivePricing).qtyFulfilled}</TableCell>
-                  <TableCell className="text-right font-semibold">
-                    {calculateSectionTotals(items, useEffectivePricing).qtyFulfilled > 0 ? (
-                      <span className="text-green-600 dark:text-green-400">
-                        ${calculateSectionTotals(items, useEffectivePricing).fulfilledValue.toFixed(2)}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                  </TableCell>
+                  {/* Qty to Fulfill - only in invoicing mode */}
+                  {editorMode === "invoicing" && (
+                    <TableCell className="text-right font-semibold text-green-700 dark:text-green-300">
+                      {calculateStagedSectionTotals(items).stagedQty > 0 ? calculateStagedSectionTotals(items).stagedQty : ""}
+                    </TableCell>
+                  )}
+                  {/* Edit mode: Qty Fulfilled and Fulfilled Price come before Unit Price/Discount */}
+                  {editorMode === "edit" && (
+                    <>
+                      {/* Qty Fulfilled */}
+                      <TableCell className="text-right font-semibold">{calculateSectionTotals(items, useEffectivePricing).qtyFulfilled}</TableCell>
+                      {/* Fulfilled Price */}
+                      <TableCell className="text-right font-semibold">
+                        {calculateSectionTotals(items, useEffectivePricing).qtyFulfilled > 0 ? (
+                          <span className="text-green-600 dark:text-green-400">
+                            ${calculateSectionTotals(items, useEffectivePricing).fulfilledValue.toFixed(2)}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                    </>
+                  )}
+                  {/* Unit Price */}
                   <TableCell></TableCell>
+                  {/* Discount */}
                   <TableCell></TableCell>
+                  {/* Non-edit mode: Qty Fulfilled and Fulfilled Price come after Unit Price/Discount */}
+                  {editorMode !== "edit" && (
+                    <>
+                      {/* Qty Fulfilled */}
+                      <TableCell className="text-right font-semibold">{calculateSectionTotals(items, useEffectivePricing).qtyFulfilled}</TableCell>
+                      {/* Fulfilled Price */}
+                      <TableCell className="text-right font-semibold">
+                        {calculateSectionTotals(items, useEffectivePricing).qtyFulfilled > 0 ? (
+                          <span className="text-green-600 dark:text-green-400">
+                            ${calculateSectionTotals(items, useEffectivePricing).fulfilledValue.toFixed(2)}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                    </>
+                  )}
+                  {/* Total */}
                   <TableCell className="text-right font-bold">${calculateSectionTotals(items, useEffectivePricing).total.toFixed(2)}</TableCell>
+                  {/* Actions */}
                   <TableCell></TableCell>
                 </TableRow>
-                {calculateStagedSectionTotals(items).itemCount > 0 && (
+                {/* Staging summary row - only in invoicing mode with staged items */}
+                {editorMode === "invoicing" && calculateStagedSectionTotals(items).itemCount > 0 && (
                   <TableRow className="bg-green-50/50 dark:bg-green-950/50 border-t-2 border-green-200 dark:border-green-800">
+                    {/* Description */}
                     <TableCell className="font-semibold text-green-700 dark:text-green-300">
-                      Staging for Invoice
+                      Staging for Invoice ({calculateStagedSectionTotals(items).itemCount} items)
                     </TableCell>
+                    {/* Qty Ordered */}
                     <TableCell></TableCell>
+                    {/* Qty Pending */}
+                    <TableCell></TableCell>
+                    {/* Qty to Fulfill */}
                     <TableCell className="text-right font-semibold text-green-700 dark:text-green-300">
                       {calculateStagedSectionTotals(items).stagedQty}
                     </TableCell>
+                    {/* Unit Price */}
                     <TableCell></TableCell>
+                    {/* Discount */}
                     <TableCell></TableCell>
+                    {/* Qty Fulfilled */}
                     <TableCell></TableCell>
+                    {/* Fulfilled Price */}
                     <TableCell></TableCell>
+                    {/* Total */}
                     <TableCell className="text-right font-bold text-green-700 dark:text-green-300">
                       ${calculateStagedSectionTotals(items).stagedTotal.toFixed(2)}
                     </TableCell>
+                    {/* Actions */}
                     <TableCell></TableCell>
                   </TableRow>
                 )}
@@ -2507,58 +2915,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         }}
       />
 
-      {/* Floating Staging Summary Card - only show in Invoicing mode with staged items */}
-      {editorMode === "invoicing" && stagedFulfillments.size > 0 && (
-        <Card className="fixed bottom-24 right-6 w-80 shadow-lg border-green-200 dark:border-green-800 bg-card z-50">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <ClipboardCheck className="h-4 w-4 text-green-600 dark:text-green-400" />
-              Staging Summary
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            {/* Per-section breakdown */}
-            {calculateStagedSectionTotals(partItems).itemCount > 0 && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">
-                  Parts ({calculateStagedSectionTotals(partItems).itemCount} items)
-                </span>
-                <span className="font-medium">
-                  ${calculateStagedSectionTotals(partItems).stagedTotal.toFixed(2)}
-                </span>
-              </div>
-            )}
-            {calculateStagedSectionTotals(laborItems2).itemCount > 0 && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">
-                  Labour ({calculateStagedSectionTotals(laborItems2).itemCount} items)
-                </span>
-                <span className="font-medium">
-                  ${calculateStagedSectionTotals(laborItems2).stagedTotal.toFixed(2)}
-                </span>
-              </div>
-            )}
-            {calculateStagedSectionTotals(miscItems2).itemCount > 0 && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">
-                  Misc ({calculateStagedSectionTotals(miscItems2).itemCount} items)
-                </span>
-                <span className="font-medium">
-                  ${calculateStagedSectionTotals(miscItems2).stagedTotal.toFixed(2)}
-                </span>
-              </div>
-            )}
-            <Separator />
-            <div className="flex justify-between font-bold">
-              <span>Total Staging</span>
-              <span className="text-green-600 dark:text-green-400">
-                ${calculateStagedGrandTotal().stagedTotal.toFixed(2)}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Unified Floating Button Group */}
       <div className="fixed bottom-6 right-6 z-50">
         <div className="flex flex-col items-end gap-2">
@@ -2585,7 +2941,9 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                 <Button
                   size="lg"
                   onClick={enterInvoicingMode}
+                  disabled={!hasAnyPendingQuantity}
                   className="shadow-lg gap-2"
+                  title={!hasAnyPendingQuantity ? "No items have pending quantities to invoice" : undefined}
                 >
                   <Receipt className="h-5 w-5" />
                   Create Invoice
@@ -2598,7 +2956,9 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               <Button
                 size="lg"
                 onClick={enterInvoicingMode}
+                disabled={!hasAnyPendingQuantity}
                 className="shadow-lg gap-2"
+                title={!hasAnyPendingQuantity ? "All items have been fully invoiced" : undefined}
               >
                 <Receipt className="h-5 w-5" />
                 Create Invoice
@@ -3120,58 +3480,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         </DialogContent>
       </Dialog>
 
-      {/* Bulk Stage by Percentage Dialog */}
-      <Dialog open={bulkStageDialogOpen} onOpenChange={setBulkStageDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Percent className="h-4 w-4" />
-              Stage by Percentage
-            </DialogTitle>
-            <DialogDescription>
-              Stage a percentage of pending quantities for all {bulkStageSection === "labor" ? "labour" : bulkStageSection} items.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 pt-4">
-            <div className="space-y-2">
-              <Label>Percentage of pending to stage</Label>
-              <div className="flex gap-2 items-center">
-                <Input
-                  type="number"
-                  min="1"
-                  max="100"
-                  value={bulkStagePercent}
-                  onChange={(e) => setBulkStagePercent(e.target.value)}
-                  className="w-24"
-                />
-                <span className="text-muted-foreground">%</span>
-              </div>
-            </div>
-            {/* Quick preset buttons */}
-            <div className="flex gap-2">
-              {[25, 50, 75, 100].map(pct => (
-                <Button
-                  key={pct}
-                  variant={bulkStagePercent === pct.toString() ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setBulkStagePercent(pct.toString())}
-                >
-                  {pct}%
-                </Button>
-              ))}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setBulkStageDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleBulkStageByPercent}>
-                Stage Items
-              </Button>
-            </DialogFooter>
-          </div>
-        </DialogContent>
-      </Dialog>
-
       {/* Discount All Dialog */}
       <Dialog open={discountAllDialogOpen} onOpenChange={setDiscountAllDialogOpen}>
         <DialogContent>
@@ -3317,6 +3625,69 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Discard Changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Client PO Missing Dialog - prevents entering invoicing mode */}
+      <AlertDialog open={clientPoMissingDialogOpen} onOpenChange={setClientPoMissingDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Client PO Number Required
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              A Client PO Number is required before creating an invoice. Please add a Client PO Number in the quote details section first.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setClientPoMissingDialogOpen(false)}>
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* No Pending Quantities Dialog - prevents entering invoicing mode when nothing to invoice */}
+      <AlertDialog open={noPendingDialogOpen} onOpenChange={setNoPendingDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              No Items to Invoice
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              There are no line items with pending quantities to invoice. All items have been fully fulfilled or the quote has no line items.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setNoPendingDialogOpen(false)}>
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Quote Changed Dialog - Flow 7E: warns when quote changed externally during invoicing or editing */}
+      <AlertDialog open={quoteChangedDialogOpen} onOpenChange={setQuoteChangedDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Quote Data Changed
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {editorMode === "edit"
+                ? "This quote has been modified since you started editing. Your staged changes have been cleared to ensure data accuracy. Please review the updated quote and re-apply your edits."
+                : "This quote has been modified since you started staging items for invoicing. Your staged quantities have been cleared to ensure data accuracy. Please review the updated quote and re-stage your items."
+              }
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setQuoteChangedDialogOpen(false)}>
+              OK
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

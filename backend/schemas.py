@@ -63,10 +63,20 @@ class Part(PartBase):
 # ===== Labor Schemas =====
 class LaborBase(BaseModel):
     description: str
-    hours: float = 1.0
+    hours: int = 1  # Must be a positive whole number
     rate: float
     markup_percent: float = 0.0
     category_id: Optional[int] = None
+
+    @validator('hours', pre=True)
+    def hours_must_be_positive_integer(cls, v) -> int:
+        # Check if value is a whole number before coercion
+        if isinstance(v, float) and not v.is_integer():
+            raise ValueError('Hours must be a positive whole number')
+        v_int = int(v)
+        if v_int <= 0:
+            raise ValueError('Hours must be a positive whole number')
+        return v_int
 
 
 class LaborCreate(LaborBase):
@@ -75,10 +85,22 @@ class LaborCreate(LaborBase):
 
 class LaborUpdate(BaseModel):
     description: Optional[str] = None
-    hours: Optional[float] = None
+    hours: Optional[int] = None  # Must be a positive whole number
     rate: Optional[float] = None
     markup_percent: Optional[float] = None
     category_id: Optional[int] = None
+
+    @validator('hours', pre=True)
+    def hours_must_be_positive_integer(cls, v) -> Optional[int]:
+        if v is None:
+            return None
+        # Check if value is a whole number before coercion
+        if isinstance(v, float) and not v.is_integer():
+            raise ValueError('Hours must be a positive whole number')
+        v_int = int(v)
+        if v_int <= 0:
+            raise ValueError('Hours must be a positive whole number')
+        return v_int
 
 
 class Labor(LaborBase):
@@ -268,12 +290,22 @@ class QuoteLineItemBase(BaseModel):
     misc_id: Optional[int] = None
     discount_code_id: Optional[int] = None
     description: Optional[str] = None
-    quantity: float = 1.0
+    quantity: int = 1  # Must be a positive whole number
     unit_price: Optional[float] = None
     is_pms: bool = False  # True for PMS items (Project Management Services)
     pms_percent: Optional[float] = None  # Percentage value for PMS % items
     original_markup_percent: Optional[float] = None  # Individual markup before global override
     base_cost: Optional[float] = None  # Base cost used for recalculation
+
+    @validator('quantity', pre=True)
+    def quantity_must_be_positive_integer(cls, v) -> int:
+        # Check if value is a whole number before coercion
+        if isinstance(v, float) and not v.is_integer():
+            raise ValueError('Quantity must be a positive whole number')
+        v_int = int(v)
+        if v_int <= 0:
+            raise ValueError('Quantity must be a positive whole number')
+        return v_int
 
 
 class QuoteLineItemCreate(QuoteLineItemBase):
@@ -281,16 +313,28 @@ class QuoteLineItemCreate(QuoteLineItemBase):
 
 
 class QuoteLineItemUpdate(BaseModel):
-    quantity: Optional[float] = None
+    quantity: Optional[int] = None  # Must be a positive whole number
     unit_price: Optional[float] = None
     discount_code_id: Optional[int] = None
+
+    @validator('quantity', pre=True)
+    def quantity_must_be_positive_integer(cls, v) -> Optional[int]:
+        if v is None:
+            return None
+        # Check if value is a whole number before coercion
+        if isinstance(v, float) and not v.is_integer():
+            raise ValueError('Quantity must be a positive whole number')
+        v_int = int(v)
+        if v_int <= 0:
+            raise ValueError('Quantity must be a positive whole number')
+        return v_int
 
 
 class QuoteLineItem(QuoteLineItemBase):
     id: int
     quote_id: int
-    qty_pending: float = 0.0
-    qty_fulfilled: float = 0.0
+    qty_pending: int = 0  # Must be whole number
+    qty_fulfilled: int = 0  # Must be whole number
     labor: Optional[Labor] = None
     part: Optional[Part] = None
     miscellaneous: Optional[Miscellaneous] = None
@@ -337,8 +381,18 @@ class POLineItemBase(BaseModel):
     item_type: str  # "part" or "misc" (NO labor for POs)
     part_id: Optional[int] = None
     description: Optional[str] = None
-    quantity: float = 1.0
+    quantity: int = 1  # Must be a positive whole number
     unit_price: Optional[float] = None
+
+    @validator('quantity', pre=True)
+    def quantity_must_be_positive_integer(cls, v) -> int:
+        # Check if value is a whole number before coercion
+        if isinstance(v, float) and not v.is_integer():
+            raise ValueError('Quantity must be a positive whole number')
+        v_int = int(v)
+        if v_int <= 0:
+            raise ValueError('Quantity must be a positive whole number')
+        return v_int
 
 
 class POLineItemCreate(POLineItemBase):
@@ -389,14 +443,21 @@ class InvoiceLineItemBase(BaseModel):
     item_type: str
     description: Optional[str] = None
     unit_price: Optional[float] = None
-    qty_ordered: float
-    qty_fulfilled_this_invoice: float
-    qty_fulfilled_total: float
-    qty_pending_after: float
+    qty_ordered: int  # Must be whole number
+    qty_fulfilled_this_invoice: int  # Must be whole number
+    qty_fulfilled_total: int  # Must be whole number
+    qty_pending_after: int  # Must be whole number
     labor_id: Optional[int] = None
     part_id: Optional[int] = None
     misc_id: Optional[int] = None
     discount_code_id: Optional[int] = None
+
+    @validator('qty_ordered', 'qty_fulfilled_this_invoice', 'qty_fulfilled_total', 'qty_pending_after', pre=True)
+    def quantities_must_be_whole_numbers(cls, v) -> int:
+        # Check if value is a whole number before coercion
+        if isinstance(v, float) and not v.is_integer():
+            raise ValueError('Must be a positive whole number')
+        return int(v)
 
 
 class InvoiceLineItem(InvoiceLineItemBase):
@@ -415,7 +476,17 @@ class InvoiceBase(BaseModel):
 
 class LineItemFulfillment(BaseModel):
     line_item_id: int
-    quantity: float  # Amount to fulfill
+    quantity: int  # Amount to fulfill - must be a positive whole number
+
+    @validator('quantity', pre=True)
+    def quantity_must_be_positive_integer(cls, v) -> int:
+        # Check if value is a whole number before coercion
+        if isinstance(v, float) and not v.is_integer():
+            raise ValueError('Must be a positive whole number')
+        v_int = int(v)
+        if v_int <= 0:
+            raise ValueError('Must be a positive whole number')
+        return v_int
 
 
 class InvoiceCreate(BaseModel):
@@ -448,15 +519,22 @@ class QuoteLineItemSnapshotBase(BaseModel):
     misc_id: Optional[int] = None
     discount_code_id: Optional[int] = None
     description: Optional[str] = None
-    quantity: float
+    quantity: int  # Must be whole number
     unit_price: Optional[float] = None
-    qty_pending: float
-    qty_fulfilled: float
+    qty_pending: int  # Must be whole number
+    qty_fulfilled: int  # Must be whole number
     is_deleted: bool = False
     is_pms: bool = False  # True for PMS items (Project Management Services)
     pms_percent: Optional[float] = None  # Percentage value for PMS % items
     original_markup_percent: Optional[float] = None  # Individual markup before global override
     base_cost: Optional[float] = None  # Base cost used for recalculation
+
+    @validator('quantity', 'qty_pending', 'qty_fulfilled', pre=True)
+    def quantities_must_be_whole_numbers(cls, v) -> int:
+        # Check if value is a whole number before coercion
+        if isinstance(v, float) and not v.is_integer():
+            raise ValueError('Must be a positive whole number')
+        return int(v)
 
 
 class QuoteLineItemSnapshot(QuoteLineItemSnapshotBase):
@@ -516,10 +594,22 @@ class StagedLineItemChange(BaseModel):
     misc_id: Optional[int] = None
     discount_code_id: Optional[int] = None
     description: Optional[str] = None
-    quantity: Optional[float] = None
+    quantity: Optional[int] = None  # Must be a positive whole number
     unit_price: Optional[float] = None
     is_pms: bool = False
     pms_percent: Optional[float] = None
+
+    @validator('quantity', pre=True)
+    def quantity_must_be_positive_integer(cls, v) -> Optional[int]:
+        if v is None:
+            return None
+        # Check if value is a whole number before coercion
+        if isinstance(v, float) and not v.is_integer():
+            raise ValueError('Quantity must be a positive whole number')
+        v_int = int(v)
+        if v_int <= 0:
+            raise ValueError('Quantity must be a positive whole number')
+        return v_int
 
 
 class CommitEditsRequest(BaseModel):

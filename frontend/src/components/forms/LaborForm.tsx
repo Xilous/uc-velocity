@@ -34,7 +34,7 @@ export function LaborForm({ labor, onSuccess, onCancel }: LaborFormProps) {
   }, [labor])
 
   // Calculate labor cost (use parsed values or 0 for display)
-  const hoursNum = parseFloat(hours) || 0
+  const hoursNum = parseInt(hours, 10) || 0
   const rateNum = parseFloat(rate) || 0
   const markupNum = parseFloat(markupPercent) || 0
   const laborCost = hoursNum * rateNum * (1 + markupNum / 100)
@@ -44,9 +44,17 @@ export function LaborForm({ labor, onSuccess, onCancel }: LaborFormProps) {
     setLoading(true)
     setError(null)
 
+    // Validate hours is a positive integer
+    const hoursValue = parseInt(hours, 10)
+    if (!Number.isInteger(hoursValue) || hoursValue <= 0) {
+      setError("Hours must be a positive whole number (e.g., 1, 2, 3...)")
+      setLoading(false)
+      return
+    }
+
     const laborData: LaborCreate = {
       description,
-      hours: parseFloat(hours) || 1,
+      hours: hoursValue,
       rate: parseFloat(rate) || 0,
       markup_percent: parseFloat(markupPercent) || 0,
     }
@@ -90,8 +98,8 @@ export function LaborForm({ labor, onSuccess, onCancel }: LaborFormProps) {
           <Input
             id="hours"
             type="number"
-            step="0.5"
-            min="0"
+            step="1"
+            min="1"
             value={hours}
             onChange={(e) => setHours(e.target.value)}
             placeholder="1"

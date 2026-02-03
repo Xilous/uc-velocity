@@ -391,10 +391,13 @@ export function ProjectDetailsPage({ projectId, onBack }: ProjectDetailsPageProp
               </div>
             </div>
           ) : selectedDoc.type === "quote" ? (
-            <QuoteEditor quoteId={selectedDoc.id} onUpdate={() => {
-              fetchProject()
-              if (project?.quotes) fetchInvoices(project.quotes)
-            }} />
+            <QuoteEditor
+              quoteId={selectedDoc.id}
+              onUpdate={() => {
+                fetchProject()
+                if (project?.quotes) fetchInvoices(project.quotes)
+              }}
+            />
           ) : selectedDoc.type === "po" ? (
             <POEditor poId={selectedDoc.id} onUpdate={fetchProject} />
           ) : (

@@ -40,7 +40,7 @@ def create_snapshot(
     Returns:
         The created QuoteSnapshot
     """
-    # Increment version
+    # Increment version for change detection
     new_version = quote.current_version + 1
     quote.current_version = new_version
 
@@ -420,7 +420,7 @@ def clone_quote(quote_id: int, db: Session = Depends(get_db)):
             quantity=item.quantity,
             unit_price=item.unit_price,
             qty_pending=item.quantity,  # Reset: pending = quantity
-            qty_fulfilled=0.0,  # Reset: fulfilled = 0
+            qty_fulfilled=0,  # Reset: fulfilled = 0
             is_pms=item.is_pms,
             pms_percent=item.pms_percent,
             original_markup_percent=item.original_markup_percent,
@@ -697,7 +697,7 @@ def add_quote_line(quote_id: int, line_data: QuoteLineItemCreate, db: Session = 
         quantity=line_data.quantity,
         unit_price=line_data.unit_price,
         qty_pending=line_data.quantity,  # Initialize qty_pending = quantity
-        qty_fulfilled=0.0,
+        qty_fulfilled=0,  # Initialize fulfilled = 0
         is_pms=line_data.is_pms,
         pms_percent=line_data.pms_percent
     )
@@ -1002,7 +1002,7 @@ def commit_edits(
                     raise HTTPException(status_code=400, detail="Discount code not found or archived")
 
             # Create the new line item
-            quantity = change.quantity or 1.0
+            quantity = change.quantity or 1
             new_item = QuoteLineItem(
                 quote_id=quote_id,
                 item_type=change.item_type,
@@ -1014,7 +1014,7 @@ def commit_edits(
                 quantity=quantity,
                 unit_price=change.unit_price,
                 qty_pending=quantity,
-                qty_fulfilled=0.0,
+                qty_fulfilled=0,  # Initialize fulfilled = 0
                 is_pms=change.is_pms,
                 pms_percent=change.pms_percent
             )
@@ -1239,7 +1239,7 @@ def create_invoice(
         if fulfillment.quantity <= 0:
             raise HTTPException(
                 status_code=400,
-                detail=f"Fulfillment quantity must be positive for line item {fulfillment.line_item_id}"
+                detail="Must be a positive number"
             )
         if fulfillment.quantity > line_item.qty_pending:
             raise HTTPException(
