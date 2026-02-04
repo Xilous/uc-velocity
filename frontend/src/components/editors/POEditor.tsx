@@ -95,7 +95,7 @@ export function POEditor({ poId, onUpdate }: POEditorProps) {
       if (!selectedPartId) return
       lineItem.part_id = parseInt(selectedPartId)
       const part = parts.find((p) => p.id === lineItem.part_id)
-      if (part) lineItem.unit_price = part.cost * (1 + (part.markup_percent ?? 0) / 100)
+      if (part) lineItem.unit_price = part.cost
     } else {
       // misc
       if (!miscDescription) return
