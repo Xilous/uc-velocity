@@ -95,7 +95,7 @@ export function POEditor({ poId, onUpdate }: POEditorProps) {
       if (!selectedPartId) return
       lineItem.part_id = parseInt(selectedPartId)
       const part = parts.find((p) => p.id === lineItem.part_id)
-      if (part) lineItem.unit_price = part.cost * (1 + (part.markup_percent ?? 0) / 100)
+      if (part) lineItem.unit_price = part.cost
     } else {
       // misc
       if (!miscDescription) return
@@ -314,7 +314,7 @@ export function POEditor({ poId, onUpdate }: POEditorProps) {
                   options={parts.map((part): SearchableSelectOption => ({
                     value: part.id.toString(),
                     label: `${part.part_number} - ${part.description}`,
-                    description: `$${(part.cost * (1 + (part.markup_percent ?? 0) / 100)).toFixed(2)}`,
+                    description: `$${(part.cost ?? 0).toFixed(2)}`,
                   }))}
                   value={selectedPartId}
                   onChange={setSelectedPartId}
