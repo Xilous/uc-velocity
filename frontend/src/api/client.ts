@@ -7,7 +7,9 @@ import type {
   Contact, ContactCreate, ContactUpdate,
   Project, ProjectCreate, ProjectFull,
   Quote, QuoteCreate, QuoteUpdate, QuoteLineItem, QuoteLineItemCreate, QuoteLineItemUpdate,
-  PurchaseOrder, PurchaseOrderCreate, POLineItem, POLineItemCreate,
+  PurchaseOrder, PurchaseOrderCreate, PurchaseOrderUpdate, POLineItem, POLineItemCreate,
+  POReceiving, POReceivingCreate, POSnapshot, PORevertPreview,
+  POCommitEditsRequest, POCommitEditsResponse,
   Invoice, InvoiceCreate, InvoiceStatusUpdate, QuoteSnapshot, RevertPreview,
   MarkupControlToggleRequest, MarkupControlToggleResponse,
   CommitEditsRequest, CommitEditsResponse
@@ -186,23 +188,60 @@ export const api = {
 
   // ===== Purchase Orders =====
   purchaseOrders: {
+    // Core CRUD
     getAll: () => request<PurchaseOrder[]>('/purchase-orders/'),
+
     get: (id: number) => request<PurchaseOrder>(`/purchase-orders/${id}`),
+
     create: (data: PurchaseOrderCreate) =>
       request<PurchaseOrder>('/purchase-orders/', { method: 'POST', body: JSON.stringify(data) }),
-    updateStatus: (id: number, status: string) =>
-      request<PurchaseOrder>(`/purchase-orders/${id}?status=${encodeURIComponent(status)}`, { method: 'PUT' }),
+
+    update: (id: number, data: PurchaseOrderUpdate) =>
+      request<PurchaseOrder>(`/purchase-orders/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
     delete: (id: number) =>
       request<{ message: string }>(`/purchase-orders/${id}`, { method: 'DELETE' }),
 
-    // Line items (NO LABOR - only part or misc)
+    // Line items
     getLines: (poId: number) =>
       request<POLineItem[]>(`/purchase-orders/${poId}/lines`),
+
     addLine: (poId: number, data: POLineItemCreate) =>
       request<POLineItem>(`/purchase-orders/${poId}/lines`, { method: 'POST', body: JSON.stringify(data) }),
+
     updateLine: (poId: number, lineId: number, data: POLineItemCreate) =>
       request<POLineItem>(`/purchase-orders/${poId}/lines/${lineId}`, { method: 'PUT', body: JSON.stringify(data) }),
+
     deleteLine: (poId: number, lineId: number) =>
       request<{ message: string }>(`/purchase-orders/${poId}/lines/${lineId}`, { method: 'DELETE' }),
+
+    // Batch commit
+    commitEdits: (poId: number, data: POCommitEditsRequest) =>
+      request<POCommitEditsResponse>(`/purchase-orders/${poId}/commit`, { method: 'POST', body: JSON.stringify(data) }),
+
+    // Receiving
+    getReceivings: (poId: number) =>
+      request<POReceiving[]>(`/purchase-orders/${poId}/receivings`),
+
+    createReceiving: (poId: number, data: POReceivingCreate) =>
+      request<POReceiving>(`/purchase-orders/${poId}/receivings`, { method: 'POST', body: JSON.stringify(data) }),
+
+    // Snapshots
+    getSnapshots: (poId: number) =>
+      request<POSnapshot[]>(`/purchase-orders/${poId}/snapshots`),
+
+    getSnapshot: (poId: number, version: number) =>
+      request<POSnapshot>(`/purchase-orders/${poId}/snapshots/${version}`),
+
+    // Revert
+    previewRevert: (poId: number, version: number) =>
+      request<PORevertPreview>(`/purchase-orders/${poId}/revert/${version}/preview`, { method: 'POST' }),
+
+    revert: (poId: number, version: number) =>
+      request<PurchaseOrder>(`/purchase-orders/${poId}/revert/${version}`, { method: 'POST' }),
+
+    // Clone
+    clone: (poId: number) =>
+      request<PurchaseOrder>(`/purchase-orders/${poId}/clone`, { method: 'POST' }),
   },
 };
