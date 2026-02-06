@@ -25,6 +25,13 @@ class PhoneType(str, enum.Enum):
     mobile = "mobile"
 
 
+class POStatus(str, enum.Enum):
+    draft = "Draft"
+    sent = "Sent"
+    received = "Received"
+    closed = "Closed"
+
+
 class Category(Base):
     __tablename__ = "categories"
 
@@ -204,17 +211,27 @@ class QuoteLineItem(Base):
 
 class PurchaseOrder(Base):
     __tablename__ = "purchase_orders"
+    __table_args__ = (
+        UniqueConstraint('project_id', 'po_sequence', name='uq_po_project_sequence'),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
     vendor_id = Column(Integer, ForeignKey('profiles.id'), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
-    status = Column(String, default="draft")
+    po_sequence = Column(Integer, nullable=False)
+    current_version = Column(Integer, default=0)
+    work_description = Column(String, nullable=True)
+    vendor_po_number = Column(String, nullable=True)
+    expected_delivery_date = Column(DateTime, nullable=True)
+    status = Column(Enum(POStatus), default=POStatus.draft)
 
     # Relationships
     project = relationship("Project", back_populates="purchase_orders")
     vendor = relationship("Profile", back_populates="purchase_orders")
     line_items = relationship("POLineItem", back_populates="purchase_order", cascade="all, delete-orphan")
+    receivings = relationship("POReceiving", back_populates="purchase_order", order_by="POReceiving.created_at")
+    snapshots = relationship("POSnapshot", back_populates="purchase_order", order_by="POSnapshot.version")
 
 
 class POLineItem(Base):
@@ -227,10 +244,87 @@ class POLineItem(Base):
     description = Column(String)  # For misc items or override
     quantity = Column(Integer, default=1)  # Must be whole number
     unit_price = Column(Float)
+    qty_pending = Column(Integer, default=0)
+    qty_received = Column(Integer, default=0)
+    actual_unit_price = Column(Float, nullable=True)
 
     # Relationships
     purchase_order = relationship("PurchaseOrder", back_populates="line_items")
     part = relationship("Part")
+    receiving_line_items = relationship("POReceivingLineItem", back_populates="po_line_item")
+
+
+class POReceiving(Base):
+    __tablename__ = "po_receivings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    purchase_order_id = Column(Integer, ForeignKey('purchase_orders.id'), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    received_date = Column(DateTime, nullable=False)
+    notes = Column(String, nullable=True)
+    voided_at = Column(DateTime, nullable=True)
+    voided_by_snapshot_id = Column(Integer, nullable=True)
+
+    # Relationships
+    purchase_order = relationship("PurchaseOrder", back_populates="receivings")
+    line_items = relationship("POReceivingLineItem", back_populates="receiving", cascade="all, delete-orphan")
+
+
+class POReceivingLineItem(Base):
+    __tablename__ = "po_receiving_line_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    receiving_id = Column(Integer, ForeignKey('po_receivings.id'), nullable=False)
+    po_line_item_id = Column(Integer, ForeignKey('po_line_items.id'), nullable=True)
+    item_type = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    unit_price = Column(Float, nullable=True)
+    actual_unit_price = Column(Float, nullable=True)
+    qty_ordered = Column(Integer, nullable=True)
+    qty_received_this_receiving = Column(Integer, nullable=True)
+    qty_received_total = Column(Integer, nullable=True)
+    qty_pending_after = Column(Integer, nullable=True)
+    part_id = Column(Integer, nullable=True)
+
+    # Relationships
+    receiving = relationship("POReceiving", back_populates="line_items")
+    po_line_item = relationship("POLineItem", back_populates="receiving_line_items")
+
+
+class POSnapshot(Base):
+    __tablename__ = "po_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    purchase_order_id = Column(Integer, ForeignKey('purchase_orders.id'), nullable=False)
+    version = Column(Integer, nullable=False)
+    action_type = Column(String, nullable=False)  # "create", "edit", "delete", "receive", "status_change", "revert"
+    action_description = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    receiving_id = Column(Integer, ForeignKey('po_receivings.id'), nullable=True)
+
+    # Relationships
+    purchase_order = relationship("PurchaseOrder", back_populates="snapshots")
+    line_item_states = relationship("POLineItemSnapshot", back_populates="snapshot", cascade="all, delete-orphan")
+
+
+class POLineItemSnapshot(Base):
+    __tablename__ = "po_line_item_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    snapshot_id = Column(Integer, ForeignKey('po_snapshots.id'), nullable=False)
+    original_line_item_id = Column(Integer, nullable=True)
+    item_type = Column(String, nullable=False)
+    part_id = Column(Integer, nullable=True)
+    description = Column(String, nullable=True)
+    quantity = Column(Integer, nullable=True)
+    unit_price = Column(Float, nullable=True)
+    qty_pending = Column(Integer, nullable=True)
+    qty_received = Column(Integer, nullable=True)
+    actual_unit_price = Column(Float, nullable=True)
+    is_deleted = Column(Boolean, default=False)
+
+    # Relationships
+    snapshot = relationship("POSnapshot", back_populates="line_item_states")
 
 
 # ===== Invoice Models =====

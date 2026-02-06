@@ -14,6 +14,13 @@ class PhoneType(str, Enum):
     mobile = "mobile"
 
 
+class POStatus(str, Enum):
+    draft = "Draft"
+    sent = "Sent"
+    received = "Received"
+    closed = "Closed"
+
+
 # ===== Category Schemas =====
 class CategoryBase(BaseModel):
     name: str
@@ -402,6 +409,10 @@ class POLineItemCreate(POLineItemBase):
 class POLineItem(POLineItemBase):
     id: int
     purchase_order_id: int
+    qty_pending: int = 0
+    qty_received: int = 0
+    actual_unit_price: Optional[float] = None
+    part: Optional[Part] = None
 
     class Config:
         from_attributes = True
@@ -411,21 +422,193 @@ class POLineItem(POLineItemBase):
 class PurchaseOrderBase(BaseModel):
     project_id: int
     vendor_id: int
-    status: str = "draft"
+    status: POStatus = POStatus.draft
+    work_description: Optional[str] = None
+    vendor_po_number: Optional[str] = None
+    expected_delivery_date: Optional[datetime] = None
 
 
 class PurchaseOrderCreate(PurchaseOrderBase):
     pass
 
 
+class PurchaseOrderUpdate(BaseModel):
+    status: Optional[POStatus] = None
+    work_description: Optional[str] = None
+    vendor_po_number: Optional[str] = None
+    expected_delivery_date: Optional[datetime] = None
+
+
 class PurchaseOrder(PurchaseOrderBase):
     id: int
     created_at: datetime
+    po_sequence: int
+    current_version: int = 0
+    po_number: Optional[str] = None
     vendor: Profile
     line_items: List[POLineItem] = []
 
     class Config:
         from_attributes = True
+
+
+# ===== PO Receiving Line Item Schemas =====
+class POReceivingLineItemBase(BaseModel):
+    po_line_item_id: Optional[int] = None
+    item_type: str
+    description: Optional[str] = None
+    unit_price: Optional[float] = None
+    actual_unit_price: Optional[float] = None
+    qty_ordered: Optional[int] = None
+    qty_received_this_receiving: Optional[int] = None
+    qty_received_total: Optional[int] = None
+    qty_pending_after: Optional[int] = None
+    part_id: Optional[int] = None
+
+    @validator('qty_ordered', 'qty_received_this_receiving', 'qty_received_total', 'qty_pending_after', pre=True)
+    def quantities_must_be_whole_numbers(cls, v) -> Optional[int]:
+        if v is None:
+            return None
+        if isinstance(v, float) and not v.is_integer():
+            raise ValueError('Must be a positive whole number')
+        v_int = int(v)
+        if v_int < 0:
+            raise ValueError('Must be a positive whole number')
+        return v_int
+
+
+class POReceivingLineItem(POReceivingLineItemBase):
+    id: int
+    receiving_id: int
+
+    class Config:
+        from_attributes = True
+
+
+# ===== PO Receiving Schemas =====
+class POReceivingLineItemCreate(BaseModel):
+    po_line_item_id: int
+    qty_received: int
+    actual_unit_price: Optional[float] = None
+
+    @validator('qty_received', pre=True)
+    def qty_received_must_be_positive_integer(cls, v) -> int:
+        if isinstance(v, float) and not v.is_integer():
+            raise ValueError('Quantity received must be a positive whole number')
+        v_int = int(v)
+        if v_int <= 0:
+            raise ValueError('Quantity received must be a positive whole number')
+        return v_int
+
+
+class POReceivingBase(BaseModel):
+    received_date: datetime
+    notes: Optional[str] = None
+
+
+class POReceivingCreate(BaseModel):
+    received_date: datetime
+    notes: Optional[str] = None
+    line_items: List[POReceivingLineItemCreate]
+
+
+class POReceiving(POReceivingBase):
+    id: int
+    purchase_order_id: int
+    created_at: datetime
+    voided_at: Optional[datetime] = None
+    voided_by_snapshot_id: Optional[int] = None
+    line_items: List[POReceivingLineItem] = []
+
+    class Config:
+        from_attributes = True
+
+
+# ===== PO Line Item Snapshot Schemas =====
+class POLineItemSnapshotBase(BaseModel):
+    original_line_item_id: Optional[int] = None
+    item_type: str
+    part_id: Optional[int] = None
+    description: Optional[str] = None
+    quantity: int
+    unit_price: Optional[float] = None
+    qty_pending: int
+    qty_received: int
+    actual_unit_price: Optional[float] = None
+    is_deleted: bool = False
+
+    @validator('quantity', 'qty_pending', 'qty_received', pre=True)
+    def quantities_must_be_whole_numbers(cls, v) -> int:
+        if isinstance(v, float) and not v.is_integer():
+            raise ValueError('Must be a positive whole number')
+        return int(v)
+
+
+class POLineItemSnapshot(POLineItemSnapshotBase):
+    id: int
+    snapshot_id: int
+
+    class Config:
+        from_attributes = True
+
+
+# ===== PO Snapshot Schemas =====
+class POSnapshotBase(BaseModel):
+    purchase_order_id: int
+    version: int
+    action_type: str  # "create", "edit", "delete", "receive", "status_change", "revert"
+    action_description: Optional[str] = None
+    receiving_id: Optional[int] = None
+
+
+class POSnapshot(POSnapshotBase):
+    id: int
+    created_at: datetime
+    line_item_states: List[POLineItemSnapshot] = []
+
+    class Config:
+        from_attributes = True
+
+
+# ===== PO Revert Preview Schema =====
+class PORevertPreview(BaseModel):
+    target_version: int
+    receivings_to_void: List[POReceiving] = []
+    changes_summary: str
+
+
+# ===== PO Commit Edits Schemas =====
+class StagedPOLineItemChange(BaseModel):
+    action: str  # "add", "edit", or "delete"
+    line_item_id: Optional[int] = None  # Required for edit/delete
+    item_type: Optional[str] = None  # "part" or "misc"
+    part_id: Optional[int] = None
+    description: Optional[str] = None
+    quantity: Optional[int] = None
+    unit_price: Optional[float] = None
+
+    @validator('quantity', pre=True)
+    def quantity_must_be_positive_integer(cls, v) -> Optional[int]:
+        if v is None:
+            return None
+        if isinstance(v, float) and not v.is_integer():
+            raise ValueError('Quantity must be a positive whole number')
+        v_int = int(v)
+        if v_int <= 0:
+            raise ValueError('Quantity must be a positive whole number')
+        return v_int
+
+
+class POCommitEditsRequest(BaseModel):
+    changes: List[StagedPOLineItemChange]
+    commit_message: Optional[str] = None
+
+
+class POCommitEditsResponse(BaseModel):
+    success: bool
+    message: str
+    purchase_order: PurchaseOrder
+    snapshot_version: int
 
 
 # ===== Project with nested documents =====
