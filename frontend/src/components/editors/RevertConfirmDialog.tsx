@@ -1,4 +1,3 @@
-import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -10,14 +9,24 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { AlertTriangle, History, FileX2 } from "lucide-react"
-import type { RevertPreview, Invoice } from "@/types"
+import type { RevertPreview, PORevertPreview } from "@/types"
+
+type RevertPreviewUnion = RevertPreview | PORevertPreview
 
 interface RevertConfirmDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  preview: RevertPreview | null
+  preview: RevertPreviewUnion | null
   onConfirm: () => void
   isLoading?: boolean
+}
+
+function isQuotePreview(preview: RevertPreviewUnion): preview is RevertPreview {
+  return "invoices_to_void" in preview
+}
+
+function isPOPreview(preview: RevertPreviewUnion): preview is PORevertPreview {
+  return "receivings_to_void" in preview
 }
 
 export function RevertConfirmDialog({
@@ -29,7 +38,11 @@ export function RevertConfirmDialog({
 }: RevertConfirmDialogProps) {
   if (!preview) return null
 
-  const hasInvoicesToVoid = preview.invoices_to_void.length > 0
+  const hasItemsToVoid = isQuotePreview(preview)
+    ? preview.invoices_to_void.length > 0
+    : preview.receivings_to_void.length > 0
+
+  const entityLabel = isQuotePreview(preview) ? "quote" : "purchase order"
 
   const getInvoiceStatusBadge = (status: string) => {
     switch (status) {
@@ -53,7 +66,7 @@ export function RevertConfirmDialog({
             Confirm Revert to Version {preview.target_version}
           </DialogTitle>
           <DialogDescription>
-            This action will restore the quote to a previous state. Please review the changes below.
+            This action will restore the {entityLabel} to a previous state. Please review the changes below.
           </DialogDescription>
         </DialogHeader>
 
@@ -64,8 +77,8 @@ export function RevertConfirmDialog({
             <p className="text-sm text-muted-foreground">{preview.changes_summary}</p>
           </div>
 
-          {/* Invoices to Void Warning */}
-          {hasInvoicesToVoid && (
+          {/* Invoices to Void Warning (Quote flow) */}
+          {isQuotePreview(preview) && preview.invoices_to_void.length > 0 && (
             <div className="bg-destructive/10 border border-destructive/20 p-4 rounded-md">
               <div className="flex items-start gap-3">
                 <AlertTriangle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
@@ -101,10 +114,51 @@ export function RevertConfirmDialog({
             </div>
           )}
 
-          {!hasInvoicesToVoid && (
+          {/* Receivings to Void Warning (PO flow) */}
+          {isPOPreview(preview) && preview.receivings_to_void.length > 0 && (
+            <div className="bg-destructive/10 border border-destructive/20 p-4 rounded-md">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <h4 className="text-sm font-medium text-destructive mb-2">
+                    Warning: Receivings Will Be Voided
+                  </h4>
+                  <p className="text-sm text-destructive/80 mb-3">
+                    Reverting to this version will void the following receiving(s).
+                    The received quantities will be returned to pending.
+                  </p>
+                  <div className="space-y-2">
+                    {preview.receivings_to_void.map((receiving) => (
+                      <div
+                        key={receiving.id}
+                        className="flex items-center justify-between bg-background/50 p-2 rounded"
+                      >
+                        <div className="flex items-center gap-2">
+                          <FileX2 className="h-4 w-4 text-destructive" />
+                          <span className="text-sm font-medium">Receiving #{receiving.id}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">
+                            {new Date(receiving.received_date).toLocaleDateString()}
+                          </span>
+                          {receiving.voided_at ? (
+                            <Badge variant="outline" className="text-muted-foreground">Voided</Badge>
+                          ) : (
+                            <Badge variant="secondary">Active</Badge>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!hasItemsToVoid && (
             <div className="bg-muted/30 p-4 rounded-md">
               <p className="text-sm text-muted-foreground">
-                No invoices will be affected by this revert.
+                No {isQuotePreview(preview) ? "invoices" : "receivings"} will be affected by this revert.
               </p>
             </div>
           )}
@@ -119,11 +173,18 @@ export function RevertConfirmDialog({
             Cancel
           </Button>
           <Button
-            variant={hasInvoicesToVoid ? "destructive" : "default"}
+            variant={hasItemsToVoid ? "destructive" : "default"}
             onClick={onConfirm}
             disabled={isLoading}
           >
-            {isLoading ? "Reverting..." : hasInvoicesToVoid ? "Void Invoices & Revert" : "Confirm Revert"}
+            {isLoading
+              ? "Reverting..."
+              : hasItemsToVoid
+              ? isQuotePreview(preview)
+                ? "Void Invoices & Revert"
+                : "Void Receivings & Revert"
+              : "Confirm Revert"
+            }
           </Button>
         </DialogFooter>
       </DialogContent>
