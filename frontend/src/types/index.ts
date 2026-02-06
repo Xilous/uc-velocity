@@ -409,6 +409,34 @@ export interface POCommitEditsResponse {
   snapshot_version: number;
 }
 
+// ===== PO Editor Mode (frontend-only state) =====
+export type POEditorMode = 'view' | 'edit' | 'receiving';
+
+/**
+ * Represents a staged edit to an existing PO line item (for Edit Mode).
+ * Only contains the changed fields - undefined means "unchanged".
+ */
+export interface StagedPOEdit {
+  originalItem: POLineItem;
+  quantity?: number;
+  unit_price?: number;
+  description?: string;
+}
+
+/**
+ * Represents a new PO line item being staged for addition (for Edit Mode).
+ * Uses a temporary negative ID to identify it before commit.
+ */
+export interface StagedPOAdd {
+  tempId: number;
+  item_type: POLineItemType;
+  part_id?: number;
+  description?: string;
+  quantity: number;
+  unit_price?: number;
+  part?: Part;  // Hydrated reference for display
+}
+
 // ===== Invoice Line Items =====
 export interface InvoiceLineItem {
   id: number;
