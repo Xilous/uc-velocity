@@ -470,7 +470,7 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
   const handleEditLineItem = () => {
     if (!editingLineItem) return
 
-    const newQuantity = parseFloat(editQuantity) || 1
+    const newQuantity = Math.max(1, parseFloat(editQuantity) || 0)
     const newUnitPrice = parseFloat(editUnitPrice) || 0
     const newDescription = editDescription.trim()
 

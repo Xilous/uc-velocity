@@ -317,14 +317,14 @@ export interface POReceivingLineItem {
   receiving_id: number;
   po_line_item_id: number | null;
   item_type: POLineItemType;
-  description: string;
-  part_id?: number;
-  unit_price: number;
-  actual_unit_price: number;
-  qty_ordered: number;
-  qty_received_this_receiving: number;
-  qty_received_total: number;
-  qty_pending_after: number;
+  description?: string | null;
+  part_id?: number | null;
+  unit_price?: number | null;
+  actual_unit_price?: number | null;
+  qty_ordered?: number | null;
+  qty_received_this_receiving?: number | null;
+  qty_received_total?: number | null;
+  qty_pending_after?: number | null;
 }
 
 export interface POReceiving {

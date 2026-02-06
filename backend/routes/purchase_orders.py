@@ -670,22 +670,24 @@ def commit_po_edits(po_id: int, request: POCommitEditsRequest, db: Session = Dep
                     detail=f"Line item {edit.line_item_id} not found or does not belong to this PO"
                 )
 
-            # Validate item_type
-            if edit.item_type not in ["part", "misc"]:
+            # Fall back to existing item_type if not provided in edit
+            effective_item_type = edit.item_type or db_line.item_type
+            if effective_item_type not in ["part", "misc"]:
                 raise HTTPException(
                     status_code=400,
                     detail="Purchase order line items must be 'part' or 'misc'"
                 )
 
             # Validate references based on item_type
-            if edit.item_type == "part":
-                if not edit.part_id:
+            effective_part_id = edit.part_id if edit.part_id is not None else db_line.part_id
+            if effective_item_type == "part":
+                if not effective_part_id:
                     raise HTTPException(status_code=400, detail="part_id required for part line items")
-                part = db.query(Part).filter(Part.id == edit.part_id).first()
+                part = db.query(Part).filter(Part.id == effective_part_id).first()
                 if not part:
-                    raise HTTPException(status_code=400, detail=f"Part {edit.part_id} not found")
-            elif edit.item_type == "misc":
-                if not edit.description:
+                    raise HTTPException(status_code=400, detail=f"Part {effective_part_id} not found")
+            elif effective_item_type == "misc":
+                if not edit.description and not db_line.description:
                     raise HTTPException(status_code=400, detail="description required for misc line items")
 
             # Validate quantity not reduced below qty_received
@@ -695,10 +697,10 @@ def commit_po_edits(po_id: int, request: POCommitEditsRequest, db: Session = Dep
                     detail=f"Cannot reduce quantity below already received amount ({db_line.qty_received})"
                 )
 
-            # Update fields
-            db_line.item_type = edit.item_type
-            db_line.part_id = edit.part_id
-            db_line.description = edit.description
+            # Update fields (use effective_item_type which falls back to existing)
+            db_line.item_type = effective_item_type
+            db_line.part_id = edit.part_id if edit.part_id is not None else db_line.part_id
+            db_line.description = edit.description if edit.description is not None else db_line.description
             db_line.quantity = edit.quantity
             db_line.unit_price = edit.unit_price
 
@@ -1308,6 +1310,9 @@ def clone_purchase_order(po_id: int, db: Session = Depends(get_db)):
         .with_for_update()
         .first()
     )
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
 
     # Get next sequence number
     next_sequence = get_next_po_sequence(db, source_po.project_id)
