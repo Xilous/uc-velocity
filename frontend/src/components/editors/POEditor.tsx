@@ -51,13 +51,14 @@ import { api } from "@/api/client"
 import type {
   PurchaseOrder, POLineItem, POLineItemCreate, POLineItemType, POStatus, Part,
   POEditorMode, StagedPOEdit, StagedPOAdd,
-  StagedPOLineItemChange, POCommitEditsRequest
+  StagedPOLineItemChange, POCommitEditsRequest, POReceivingCreate, POReceivingLineItemCreate
 } from "@/types"
 import {
-  Plus, Trash2, Package, FileText, Building, Pencil, Copy,
-  X, GitCommit, Eye, AlertTriangle, Check, Clock, Calendar
+  Plus, Minus, Trash2, Package, FileText, Building, Pencil, Copy,
+  X, GitCommit, Eye, AlertTriangle, Check, Calendar, Loader2
 } from "lucide-react"
 import { PartForm } from "@/components/forms/PartForm"
+import { POAuditTrail } from "./POAuditTrail"
 
 interface POEditorProps {
   poId: number
@@ -126,12 +127,24 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
   const [isCloning, setIsCloning] = useState(false)
   const [cloneConfirmOpen, setCloneConfirmOpen] = useState(false)
 
+  // ===== Receiving Mode State =====
+  const [stagedReceivings, setStagedReceivings] = useState<Map<number, {
+    qty_received: number;
+    actual_unit_price?: number;
+  }>>(new Map())
+  const [receivedDate, setReceivedDate] = useState<string>(new Date().toISOString().split('T')[0])
+  const [receivingDialogOpen, setReceivingDialogOpen] = useState(false)
+  const [isSubmittingReceiving, setIsSubmittingReceiving] = useState(false)
+
   // ===== Computed Values =====
   const hasBeenReceived = po?.line_items.some(item => item.qty_received > 0) ?? false
   const hasStagedChanges = stagedEdits.size > 0 || stagedAdds.length > 0 || stagedDeletes.size > 0
   const stagedChangesCount = stagedEdits.size + stagedAdds.length + stagedDeletes.size
   const hasAnyUnsavedChanges = editorMode === "edit" && hasStagedChanges
   const canEdit = editorMode === "edit" && po?.status === "Draft"
+  const hasPendingItems = po?.line_items.some(item => item.qty_pending > 0) ?? false
+  const canReceive = (po?.status === "Sent" || po?.status === "Received") && hasPendingItems
+  const stagedReceivingsCount = Array.from(stagedReceivings.values()).filter(r => r.qty_received > 0).length
 
   // ===== Data Fetching =====
 
@@ -544,10 +557,10 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
 
   // ===== Status & Clone Handlers =====
 
-  // Allowed status transitions: Draft->Sent, Sent->Draft, Sent->Received, Received->Closed
+  // Allowed status transitions: Draft->Sent, Sent->Received/Closed, Received->Closed
   const allowedTransitions: Record<POStatus, POStatus[]> = {
     Draft: ["Sent"],
-    Sent: ["Draft", "Received"],
+    Sent: ["Received", "Closed"],
     Received: ["Closed"],
     Closed: [],
   }
@@ -584,6 +597,82 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
       alert(err instanceof Error ? err.message : "Failed to clone purchase order")
     } finally {
       setIsCloning(false)
+    }
+  }
+
+  // ===== Receiving Mode Handlers =====
+
+  const enterReceivingMode = () => {
+    if (!canReceive) return
+    setStagedReceivings(new Map())
+    setReceivedDate(new Date().toISOString().split('T')[0])
+    setReceivingDialogOpen(true)
+    setEditorMode("receiving")
+  }
+
+  const exitReceivingMode = () => {
+    setStagedReceivings(new Map())
+    setReceivedDate(new Date().toISOString().split('T')[0])
+    setReceivingDialogOpen(false)
+    setEditorMode("view")
+  }
+
+  const updateStagedReceiving = (lineItemId: number, qty: number, actualPrice?: number) => {
+    const newMap = new Map(stagedReceivings)
+    if (qty <= 0 && actualPrice === undefined) {
+      newMap.delete(lineItemId)
+    } else {
+      const existing = newMap.get(lineItemId)
+      newMap.set(lineItemId, {
+        qty_received: Math.max(0, qty),
+        actual_unit_price: actualPrice ?? existing?.actual_unit_price,
+      })
+    }
+    setStagedReceivings(newMap)
+  }
+
+  const handleSubmitReceiving = async () => {
+    if (!po) return
+
+    // Build the line items for the receiving
+    const receivingLineItems: POReceivingLineItemCreate[] = []
+    for (const [lineItemId, staged] of stagedReceivings) {
+      if (staged.qty_received > 0) {
+        receivingLineItems.push({
+          po_line_item_id: lineItemId,
+          qty_received: staged.qty_received,
+          actual_unit_price: staged.actual_unit_price,
+        })
+      }
+    }
+
+    if (receivingLineItems.length === 0) return
+
+    setIsSubmittingReceiving(true)
+    try {
+      const payload: POReceivingCreate = {
+        received_date: receivedDate,
+        line_items: receivingLineItems,
+      }
+      await api.purchaseOrders.createReceiving(poId, payload)
+
+      // Exit receiving mode and refresh
+      exitReceivingMode()
+      await fetchPO()
+      onUpdate?.()
+
+      // Check if all items are now received - auto-transition to "Received"
+      const freshPO = await api.purchaseOrders.get(poId)
+      const allReceived = freshPO.line_items.every(item => item.qty_pending === 0)
+      if (allReceived && freshPO.status === "Sent") {
+        await api.purchaseOrders.update(poId, { status: "Received" })
+        fetchPO()
+        onUpdate?.()
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to submit receiving")
+    } finally {
+      setIsSubmittingReceiving(false)
     }
   }
 
@@ -1315,20 +1404,17 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
         </CardContent>
       </Card>
 
-      {/* Audit Trail Placeholder */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Clock className="h-4 w-4" />
-            Audit Trail
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            Version {po.current_version} — Audit trail will be implemented in the next phase.
-          </p>
-        </CardContent>
-      </Card>
+      {/* Audit Trail */}
+      {editorMode !== "edit" && (
+        <POAuditTrail
+          purchaseOrderId={poId}
+          currentVersion={po.current_version}
+          onRevert={() => {
+            fetchPO()
+            onUpdate?.()
+          }}
+        />
+      )}
 
       {/* ===== Floating Action Buttons ===== */}
       <div className="fixed bottom-6 right-6 z-50">
@@ -1345,6 +1431,33 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
                 <Pencil className="h-5 w-5" />
                 Edit PO
               </Button>
+            )}
+
+            {/* View Mode: Receive Items button (for Sent/Received POs with pending items) */}
+            {editorMode === "view" && canReceive && (
+              <Button
+                size="lg"
+                onClick={enterReceivingMode}
+                className="shadow-lg gap-2 bg-green-600 hover:bg-green-700 text-white"
+              >
+                <Package className="h-5 w-5" />
+                Receive Items
+              </Button>
+            )}
+
+            {/* Receiving Mode: Cancel and Submit buttons */}
+            {editorMode === "receiving" && (
+              <>
+                <Button
+                  size="lg"
+                  variant="outline"
+                  onClick={exitReceivingMode}
+                  className="shadow-lg gap-2"
+                >
+                  <X className="h-5 w-5" />
+                  Cancel
+                </Button>
+              </>
             )}
 
             {/* Edit Mode: Discard, Preview, and Commit buttons */}
@@ -1739,6 +1852,168 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Receiving Dialog */}
+      <Dialog open={receivingDialogOpen} onOpenChange={(open) => {
+        if (!open) exitReceivingMode()
+      }}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5 text-green-600" />
+              Receive Items
+            </DialogTitle>
+            <DialogDescription>
+              Record vendor delivery and actual prices for {po.po_number}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 pt-2">
+            {/* Received Date */}
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1">
+                <Calendar className="h-3 w-3" />
+                Received Date
+              </Label>
+              <Input
+                type="date"
+                value={receivedDate}
+                onChange={(e) => setReceivedDate(e.target.value)}
+                className="max-w-xs"
+              />
+            </div>
+
+            <Separator />
+
+            {/* Items Table */}
+            {(() => {
+              const pendingItems = po.line_items.filter(item => item.qty_pending > 0)
+              if (pendingItems.length === 0) {
+                return (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Check className="h-8 w-8 mx-auto mb-2 text-green-600" />
+                    <p>All items have been received.</p>
+                  </div>
+                )
+              }
+
+              return (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Description</TableHead>
+                      <TableHead className="text-center">Ordered</TableHead>
+                      <TableHead className="text-center">Pending</TableHead>
+                      <TableHead className="text-center">Receive Qty</TableHead>
+                      <TableHead className="text-right">Unit Price</TableHead>
+                      <TableHead className="text-right">Actual Price</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pendingItems.map((item) => {
+                      const staged = stagedReceivings.get(item.id)
+                      const qtyReceiving = staged?.qty_received ?? 0
+                      const isReceiving = qtyReceiving > 0
+
+                      return (
+                        <TableRow
+                          key={item.id}
+                          className={isReceiving ? "bg-green-50/50 dark:bg-green-950/30" : ""}
+                        >
+                          <TableCell>
+                            <span className="font-medium">{getLineItemDescription(item)}</span>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Badge variant="outline">{item.quantity}</Badge>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Badge variant="secondary">{item.qty_pending}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center justify-center gap-1">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                disabled={qtyReceiving <= 0 || isSubmittingReceiving}
+                                onClick={() => updateStagedReceiving(item.id, qtyReceiving - 1, staged?.actual_unit_price)}
+                              >
+                                <Minus className="h-3 w-3" />
+                              </Button>
+                              <Input
+                                type="number"
+                                min={0}
+                                max={item.qty_pending}
+                                value={qtyReceiving}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value) || 0
+                                  const clamped = Math.min(Math.max(0, val), item.qty_pending)
+                                  updateStagedReceiving(item.id, clamped, staged?.actual_unit_price)
+                                }}
+                                disabled={isSubmittingReceiving}
+                                className="h-8 w-16 text-center"
+                              />
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                disabled={qtyReceiving >= item.qty_pending || isSubmittingReceiving}
+                                onClick={() => updateStagedReceiving(item.id, qtyReceiving + 1, staged?.actual_unit_price)}
+                              >
+                                <Plus className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {formatCurrency(item.unit_price ?? 0)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Input
+                              type="number"
+                              step="0.01"
+                              placeholder={`${(item.unit_price ?? 0).toFixed(2)}`}
+                              value={staged?.actual_unit_price ?? ""}
+                              onChange={(e) => {
+                                const val = e.target.value ? parseFloat(e.target.value) : undefined
+                                updateStagedReceiving(item.id, qtyReceiving, val)
+                              }}
+                              disabled={isSubmittingReceiving}
+                              className="h-8 w-28 text-right ml-auto"
+                            />
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              )
+            })()}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={exitReceivingMode} disabled={isSubmittingReceiving}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmitReceiving}
+              disabled={stagedReceivingsCount === 0 || isSubmittingReceiving || !receivedDate}
+              className="bg-green-600 hover:bg-green-700 text-white gap-2"
+            >
+              {isSubmittingReceiving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Submitting...
+                </>
+              ) : (
+                <>
+                  <Check className="h-4 w-4" />
+                  Confirm Receipt ({stagedReceivingsCount} item{stagedReceivingsCount !== 1 ? "s" : ""})
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
