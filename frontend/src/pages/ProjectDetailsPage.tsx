@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 // Card components available if needed
@@ -11,6 +11,16 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   Select,
   SelectContent,
@@ -34,6 +44,7 @@ import {
   Mail,
   Phone,
   Receipt,
+  AlertTriangle,
 } from "lucide-react"
 
 interface ProjectDetailsPageProps {
@@ -49,6 +60,37 @@ export function ProjectDetailsPage({ projectId, onBack }: ProjectDetailsPageProp
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedDoc, setSelectedDoc] = useState<SelectedDocument>(null)
+
+  // Unsaved changes navigation guard
+  const editorDirtyRef = useRef(false)
+  const [navConfirmOpen, setNavConfirmOpen] = useState(false)
+  const pendingNavAction = useRef<(() => void) | null>(null)
+
+  const handleEditorDirtyChange = useCallback((isDirty: boolean) => {
+    editorDirtyRef.current = isDirty
+  }, [])
+
+  // Guarded navigation: checks dirty state before allowing navigation
+  const guardedNavigate = useCallback((action: () => void) => {
+    if (editorDirtyRef.current) {
+      pendingNavAction.current = action
+      setNavConfirmOpen(true)
+    } else {
+      action()
+    }
+  }, [])
+
+  const handleConfirmNavigation = useCallback(() => {
+    setNavConfirmOpen(false)
+    editorDirtyRef.current = false
+    pendingNavAction.current?.()
+    pendingNavAction.current = null
+  }, [])
+
+  const handleCancelNavigation = useCallback(() => {
+    setNavConfirmOpen(false)
+    pendingNavAction.current = null
+  }, [])
 
   // Dialog states
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false)
@@ -185,7 +227,7 @@ export function ProjectDetailsPage({ projectId, onBack }: ProjectDetailsPageProp
     <div className="h-full flex flex-col">
       {/* Header */}
       <div className="border-b bg-card p-4">
-        <Button variant="ghost" size="sm" onClick={onBack} className="mb-2">
+        <Button variant="ghost" size="sm" onClick={() => guardedNavigate(onBack)} className="mb-2">
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Projects
         </Button>
@@ -259,7 +301,7 @@ export function ProjectDetailsPage({ projectId, onBack }: ProjectDetailsPageProp
                             ? "bg-primary/10 text-primary"
                             : "hover:bg-muted"
                         }`}
-                        onClick={() => setSelectedDoc({ type: "quote", id: quote.id })}
+                        onClick={() => guardedNavigate(() => setSelectedDoc({ type: "quote", id: quote.id }))}
                       >
                         <div>
                           <div className="text-sm font-medium">{quote.quote_number}</div>
@@ -306,10 +348,10 @@ export function ProjectDetailsPage({ projectId, onBack }: ProjectDetailsPageProp
                             ? "bg-primary/10 text-primary"
                             : "hover:bg-muted"
                         }`}
-                        onClick={() => setSelectedDoc({ type: "po", id: po.id })}
+                        onClick={() => guardedNavigate(() => setSelectedDoc({ type: "po", id: po.id }))}
                       >
                         <div>
-                          <div className="text-sm font-medium">PO #{po.id}</div>
+                          <div className="text-sm font-medium">{po.po_number}</div>
                           <div className="text-xs text-muted-foreground">
                             {po.vendor.name}
                           </div>
@@ -350,7 +392,7 @@ export function ProjectDetailsPage({ projectId, onBack }: ProjectDetailsPageProp
                             ? "bg-primary/10 text-primary"
                             : "hover:bg-muted"
                         }`}
-                        onClick={() => setSelectedDoc({ type: "invoice", id: invoice.id })}
+                        onClick={() => guardedNavigate(() => setSelectedDoc({ type: "invoice", id: invoice.id }))}
                       >
                         <div>
                           <div className="text-sm font-medium flex items-center gap-2">
@@ -399,7 +441,12 @@ export function ProjectDetailsPage({ projectId, onBack }: ProjectDetailsPageProp
               }}
             />
           ) : selectedDoc.type === "po" ? (
-            <POEditor poId={selectedDoc.id} onUpdate={fetchProject} />
+            <POEditor
+              poId={selectedDoc.id}
+              onUpdate={fetchProject}
+              onSelectPO={(newPoId) => setSelectedDoc({ type: "po", id: newPoId })}
+              onDirtyStateChange={handleEditorDirtyChange}
+            />
           ) : (
             <InvoiceEditor invoiceId={selectedDoc.id} onUpdate={() => {
               fetchProject()
@@ -467,6 +514,30 @@ export function ProjectDetailsPage({ projectId, onBack }: ProjectDetailsPageProp
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Unsaved Changes Navigation Confirmation */}
+      <AlertDialog open={navConfirmOpen} onOpenChange={setNavConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Unsaved Changes
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved changes that will be lost if you navigate away. Are you sure you want to leave?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCancelNavigation}>Stay</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmNavigation}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Leave Without Saving
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

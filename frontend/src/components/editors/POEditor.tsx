@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -9,7 +10,25 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -19,42 +38,120 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
 import { SearchableSelect } from "@/components/ui/searchable-select"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import type { SearchableSelectOption } from "@/components/ui/searchable-select"
 import { api } from "@/api/client"
-import type { PurchaseOrder, POLineItem, POLineItemCreate, POLineItemType, Part } from "@/types"
-import { Plus, Trash2, Package, FileText, Building } from "lucide-react"
+import type {
+  PurchaseOrder, POLineItem, POLineItemCreate, POLineItemType, POStatus, Part,
+  POEditorMode, StagedPOEdit, StagedPOAdd,
+  StagedPOLineItemChange, POCommitEditsRequest
+} from "@/types"
+import {
+  Plus, Trash2, Package, FileText, Building, Pencil, Copy,
+  X, GitCommit, Eye, AlertTriangle, Check, Clock, Calendar
+} from "lucide-react"
 import { PartForm } from "@/components/forms/PartForm"
 
 interface POEditorProps {
   poId: number
   onUpdate?: () => void
+  onSelectPO?: (poId: number) => void
+  onDirtyStateChange?: (isDirty: boolean) => void
 }
 
-export function POEditor({ poId, onUpdate }: POEditorProps) {
+export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POEditorProps) {
+  // ===== Core State =====
   const [po, setPO] = useState<PurchaseOrder | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Dialog states
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [dialogType, setDialogType] = useState<POLineItemType>("part")
+  // ===== Dialog States =====
+  const [addDialogOpen, setAddDialogOpen] = useState(false)
+  const [addDialogType, setAddDialogType] = useState<POLineItemType>("part")
 
-  // Available items for selection
+  // Edit dialog states
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [editingLineItem, setEditingLineItem] = useState<POLineItem | null>(null)
+
+  // ===== Resource States =====
   const [parts, setParts] = useState<Part[]>([])
 
-  // Form fields
+  // ===== Add Form Fields =====
   const [selectedPartId, setSelectedPartId] = useState<string>("")
   const [miscDescription, setMiscDescription] = useState("")
   const [quantity, setQuantity] = useState("1")
   const [unitPrice, setUnitPrice] = useState("")
+
+  // ===== Edit Form Fields =====
+  const [editQuantity, setEditQuantity] = useState("1")
+  const [editUnitPrice, setEditUnitPrice] = useState("")
+  const [editDescription, setEditDescription] = useState("")
+
+  // ===== Editor Mode State (Commit-based workflow) =====
+  const [editorMode, setEditorMode] = useState<POEditorMode>("view")
+  const [stagedEdits, setStagedEdits] = useState<Map<number, StagedPOEdit>>(new Map())
+  const [stagedAdds, setStagedAdds] = useState<StagedPOAdd[]>([])
+  const [stagedDeletes, setStagedDeletes] = useState<Set<number>>(new Set())
+  const [nextTempId, setNextTempId] = useState(-1) // Negative IDs for staged adds
+  const [isCommitting, setIsCommitting] = useState(false)
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false)
+  const [editPreviewOpen, setEditPreviewOpen] = useState(false)
+  const [commitConfirmOpen, setCommitConfirmOpen] = useState(false)
+
+  // ===== Version Tracking =====
+  const [editModeStartVersion, setEditModeStartVersion] = useState<number | null>(null)
+  const [poChangedDialogOpen, setPOChangedDialogOpen] = useState(false)
+
+  // ===== Metadata Editing States =====
+  const [workDescription, setWorkDescription] = useState("")
+  const [isEditingWorkDescription, setIsEditingWorkDescription] = useState(false)
+  const [savingWorkDescription, setSavingWorkDescription] = useState(false)
+
+  const [vendorPoNumber, setVendorPoNumber] = useState("")
+  const [isEditingVendorPo, setIsEditingVendorPo] = useState(false)
+  const [savingVendorPo, setSavingVendorPo] = useState(false)
+
+  const [expectedDeliveryDate, setExpectedDeliveryDate] = useState("")
+  const [isEditingDeliveryDate, setIsEditingDeliveryDate] = useState(false)
+  const [savingDeliveryDate, setSavingDeliveryDate] = useState(false)
+
+  // ===== Clone State =====
+  const [isCloning, setIsCloning] = useState(false)
+  const [cloneConfirmOpen, setCloneConfirmOpen] = useState(false)
+
+  // ===== Computed Values =====
+  const hasBeenReceived = po?.line_items.some(item => item.qty_received > 0) ?? false
+  const hasStagedChanges = stagedEdits.size > 0 || stagedAdds.length > 0 || stagedDeletes.size > 0
+  const stagedChangesCount = stagedEdits.size + stagedAdds.length + stagedDeletes.size
+  const hasAnyUnsavedChanges = editorMode === "edit" && hasStagedChanges
+  const canEdit = editorMode === "edit" && po?.status === "Draft"
+
+  // ===== Data Fetching =====
 
   const fetchPO = async () => {
     setLoading(true)
     setError(null)
     try {
       const data = await api.purchaseOrders.get(poId)
+
+      // Detect external changes during edit mode
+      if (editorMode === "edit" && editModeStartVersion !== null && data.current_version !== editModeStartVersion) {
+        clearEditModeState()
+        setPOChangedDialogOpen(true)
+        setEditModeStartVersion(data.current_version)
+      }
+
       setPO(data)
+      setWorkDescription(data.work_description || "")
+      setVendorPoNumber(data.vendor_po_number || "")
+      setExpectedDeliveryDate(data.expected_delivery_date || "")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch purchase order")
     } finally {
@@ -76,69 +173,505 @@ export function POEditor({ poId, onUpdate }: POEditorProps) {
     fetchParts()
   }, [poId])
 
+  // ===== Navigation Guard =====
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasAnyUnsavedChanges) {
+        e.preventDefault()
+        e.returnValue = "You have unsaved changes that will be lost. Are you sure you want to leave?"
+        return e.returnValue
+      }
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+    }
+  }, [hasAnyUnsavedChanges])
+
+  // ===== Notify parent of dirty state =====
+  useEffect(() => {
+    onDirtyStateChange?.(hasAnyUnsavedChanges)
+  }, [hasAnyUnsavedChanges])
+
+  // ===== Edit Mode Handlers =====
+
+  const enterEditMode = () => {
+    if (po?.status !== "Draft") return
+    if (hasBeenReceived) return // Cannot edit POs that have been received
+    setEditModeStartVersion(po?.current_version ?? null)
+    setEditorMode("edit")
+  }
+
+  const exitEditMode = (confirmDiscard = false) => {
+    if (hasStagedChanges && !confirmDiscard) {
+      setDiscardConfirmOpen(true)
+      return
+    }
+    clearEditModeState()
+    setEditorMode("view")
+    setDiscardConfirmOpen(false)
+  }
+
+  const clearEditModeState = () => {
+    setStagedEdits(new Map())
+    setStagedAdds([])
+    setStagedDeletes(new Set())
+    setEditModeStartVersion(null)
+  }
+
+  const stageEdit = (item: POLineItem, changes: Partial<Omit<StagedPOEdit, "originalItem">>) => {
+    const newStagedEdits = new Map(stagedEdits)
+    const existing = newStagedEdits.get(item.id)
+
+    if (existing) {
+      newStagedEdits.set(item.id, { ...existing, ...changes })
+    } else {
+      newStagedEdits.set(item.id, { originalItem: item, ...changes })
+    }
+
+    // Check if all values are back to original - if so, remove the staged edit
+    const staged = newStagedEdits.get(item.id)!
+    const isUnchanged =
+      (staged.quantity === undefined || staged.quantity === item.quantity) &&
+      (staged.unit_price === undefined || staged.unit_price === (item.unit_price ?? 0)) &&
+      (staged.description === undefined || staged.description === (item.description ?? ""))
+
+    if (isUnchanged) {
+      newStagedEdits.delete(item.id)
+    }
+
+    setStagedEdits(newStagedEdits)
+  }
+
+  const stageAdd = (newItem: Omit<StagedPOAdd, "tempId">) => {
+    const tempId = nextTempId
+    setNextTempId(prev => prev - 1)
+    setStagedAdds(prev => [...prev, { ...newItem, tempId }])
+  }
+
+  const unstageAdd = (tempId: number) => {
+    setStagedAdds(prev => prev.filter(item => item.tempId !== tempId))
+  }
+
+  const stageDelete = (lineItemId: number) => {
+    setStagedDeletes(prev => new Set(prev).add(lineItemId))
+    // Remove from staged edits if it was being edited
+    if (stagedEdits.has(lineItemId)) {
+      const newStagedEdits = new Map(stagedEdits)
+      newStagedEdits.delete(lineItemId)
+      setStagedEdits(newStagedEdits)
+    }
+  }
+
+  const unstageDelete = (lineItemId: number) => {
+    setStagedDeletes(prev => {
+      const newSet = new Set(prev)
+      newSet.delete(lineItemId)
+      return newSet
+    })
+  }
+
+  const handleCommitChanges = async () => {
+    if (!hasStagedChanges) return
+
+    setIsCommitting(true)
+    setCommitConfirmOpen(false)
+
+    try {
+      // Pre-submit staleness check
+      if (editModeStartVersion !== null) {
+        const freshPO = await api.purchaseOrders.get(poId)
+        if (freshPO.current_version !== editModeStartVersion) {
+          clearEditModeState()
+          setPO(freshPO)
+          setWorkDescription(freshPO.work_description || "")
+          setVendorPoNumber(freshPO.vendor_po_number || "")
+          setExpectedDeliveryDate(freshPO.expected_delivery_date || "")
+          setEditModeStartVersion(freshPO.current_version)
+          setPOChangedDialogOpen(true)
+          setIsCommitting(false)
+          return
+        }
+      }
+
+      const changes: StagedPOLineItemChange[] = []
+
+      // Add staged adds
+      for (const add of stagedAdds) {
+        changes.push({
+          action: "add",
+          item_type: add.item_type,
+          part_id: add.part_id,
+          description: add.description,
+          quantity: add.quantity,
+          unit_price: add.unit_price,
+        })
+      }
+
+      // Add staged edits
+      for (const [lineItemId, edit] of stagedEdits) {
+        changes.push({
+          action: "edit",
+          line_item_id: lineItemId,
+          quantity: edit.quantity,
+          unit_price: edit.unit_price,
+          description: edit.description,
+        })
+      }
+
+      // Add staged deletes
+      for (const lineItemId of stagedDeletes) {
+        changes.push({
+          action: "delete",
+          line_item_id: lineItemId,
+        })
+      }
+
+      const request: POCommitEditsRequest = { changes }
+      await api.purchaseOrders.commitEdits(poId, request)
+
+      // Clear staged changes and exit edit mode
+      setStagedEdits(new Map())
+      setStagedAdds([])
+      setStagedDeletes(new Set())
+      setEditorMode("view")
+
+      // Refresh PO data
+      fetchPO()
+      onUpdate?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to commit changes")
+    } finally {
+      setIsCommitting(false)
+    }
+  }
+
+  // ===== Display Value Helpers (considering staged edits) =====
+
+  const getDisplayQuantity = (item: POLineItem): number => {
+    const staged = stagedEdits.get(item.id)
+    return staged?.quantity ?? item.quantity
+  }
+
+  const getDisplayUnitPrice = (item: POLineItem): number => {
+    const staged = stagedEdits.get(item.id)
+    return staged?.unit_price ?? item.unit_price ?? 0
+  }
+
+  const getDisplayDescription = (item: POLineItem): string => {
+    const staged = stagedEdits.get(item.id)
+    if (staged?.description !== undefined) return staged.description
+    return item.description ?? ""
+  }
+
+  // ===== Line Item CRUD Handlers =====
+
   const openAddDialog = (type: POLineItemType) => {
-    setDialogType(type)
+    setAddDialogType(type)
     setSelectedPartId("")
     setMiscDescription("")
     setQuantity("1")
     setUnitPrice("")
-    setDialogOpen(true)
+    setAddDialogOpen(true)
+  }
+
+  const openEditDialog = (item: POLineItem) => {
+    setEditingLineItem(item)
+    // Use staged values if available, otherwise original
+    const staged = stagedEdits.get(item.id)
+    setEditQuantity((staged?.quantity ?? item.quantity).toString())
+    setEditUnitPrice((staged?.unit_price ?? item.unit_price ?? 0).toString())
+    setEditDescription(staged?.description ?? item.description ?? "")
+    setEditDialogOpen(true)
   }
 
   const handleAddLineItem = async () => {
-    const lineItem: POLineItemCreate = {
-      item_type: dialogType,
-      quantity: parseFloat(quantity) || 1,
-    }
+    const qty = parseFloat(quantity) || 1
 
-    if (dialogType === "part") {
+    if (addDialogType === "part") {
       if (!selectedPartId) return
-      lineItem.part_id = parseInt(selectedPartId)
-      const part = parts.find((p) => p.id === lineItem.part_id)
-      if (part) lineItem.unit_price = part.cost
-    } else {
-      // misc
+      const part = parts.find((p) => p.id === parseInt(selectedPartId))
+      if (!part) return
+
+      // For POs we use base cost (no markup)
+      const partUnitPrice = part.cost
+
+      if (editorMode === "edit") {
+        stageAdd({
+          item_type: "part",
+          part_id: part.id,
+          quantity: qty,
+          unit_price: partUnitPrice,
+          part: part,
+        })
+        setAddDialogOpen(false)
+        return
+      }
+
+      // Direct API call in view mode (fallback)
+      try {
+        await api.purchaseOrders.addLine(poId, {
+          item_type: "part",
+          part_id: part.id,
+          quantity: qty,
+          unit_price: partUnitPrice,
+        })
+        setAddDialogOpen(false)
+        fetchPO()
+        onUpdate?.()
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Failed to add line item")
+      }
+    } else if (addDialogType === "misc") {
       if (!miscDescription) return
-      lineItem.description = miscDescription
-      lineItem.unit_price = parseFloat(unitPrice) || 0
-    }
+      const miscUnitPrice = parseFloat(unitPrice) || 0
 
-    try {
-      await api.purchaseOrders.addLine(poId, lineItem)
-      setDialogOpen(false)
-      fetchPO()
-      onUpdate?.()
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to add line item")
+      if (editorMode === "edit") {
+        stageAdd({
+          item_type: "misc",
+          description: miscDescription,
+          quantity: qty,
+          unit_price: miscUnitPrice,
+        })
+        setAddDialogOpen(false)
+        return
+      }
+
+      try {
+        await api.purchaseOrders.addLine(poId, {
+          item_type: "misc",
+          description: miscDescription,
+          quantity: qty,
+          unit_price: miscUnitPrice,
+        })
+        setAddDialogOpen(false)
+        fetchPO()
+        onUpdate?.()
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Failed to add line item")
+      }
     }
   }
 
-  const handleDeleteLine = async (lineId: number) => {
-    if (!confirm("Delete this line item?")) return
+  const handleEditLineItem = () => {
+    if (!editingLineItem) return
+
+    const newQuantity = parseFloat(editQuantity) || 1
+    const newUnitPrice = parseFloat(editUnitPrice) || 0
+    const newDescription = editDescription.trim()
+
+    if (editorMode === "edit") {
+      const changes: Partial<Omit<StagedPOEdit, "originalItem">> = {}
+
+      if (newQuantity !== editingLineItem.quantity) {
+        changes.quantity = newQuantity
+      }
+      if (newUnitPrice !== (editingLineItem.unit_price ?? 0)) {
+        changes.unit_price = newUnitPrice
+      }
+      if (editingLineItem.item_type === "misc" && newDescription !== (editingLineItem.description ?? "")) {
+        changes.description = newDescription
+      }
+
+      if (Object.keys(changes).length > 0) {
+        stageEdit(editingLineItem, changes)
+      }
+
+      setEditDialogOpen(false)
+      setEditingLineItem(null)
+      return
+    }
+
+    setEditDialogOpen(false)
+    setEditingLineItem(null)
+  }
+
+  const handleDeleteLine = (lineId: number) => {
+    if (editorMode === "edit") {
+      if (stagedDeletes.has(lineId)) {
+        unstageDelete(lineId)
+      } else {
+        stageDelete(lineId)
+      }
+      return
+    }
+  }
+
+  // ===== Metadata Handlers (save immediately, no staging) =====
+
+  const handleSaveWorkDescription = async () => {
+    setSavingWorkDescription(true)
     try {
-      await api.purchaseOrders.deleteLine(poId, lineId)
+      await api.purchaseOrders.update(poId, { work_description: workDescription.trim() || null })
+      setIsEditingWorkDescription(false)
       fetchPO()
       onUpdate?.()
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to delete line item")
+      alert(err instanceof Error ? err.message : "Failed to update work description")
+    } finally {
+      setSavingWorkDescription(false)
     }
   }
+
+  const handleSaveVendorPoNumber = async () => {
+    setSavingVendorPo(true)
+    try {
+      await api.purchaseOrders.update(poId, { vendor_po_number: vendorPoNumber.trim() || null })
+      setIsEditingVendorPo(false)
+      fetchPO()
+      onUpdate?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update vendor PO number")
+    } finally {
+      setSavingVendorPo(false)
+    }
+  }
+
+  const handleSaveExpectedDeliveryDate = async () => {
+    setSavingDeliveryDate(true)
+    try {
+      await api.purchaseOrders.update(poId, { expected_delivery_date: expectedDeliveryDate || null })
+      setIsEditingDeliveryDate(false)
+      fetchPO()
+      onUpdate?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update expected delivery date")
+    } finally {
+      setSavingDeliveryDate(false)
+    }
+  }
+
+  // ===== Status & Clone Handlers =====
+
+  // Allowed status transitions: Draft->Sent, Sent->Draft, Sent->Received, Received->Closed
+  const allowedTransitions: Record<POStatus, POStatus[]> = {
+    Draft: ["Sent"],
+    Sent: ["Draft", "Received"],
+    Received: ["Closed"],
+    Closed: [],
+  }
+
+  const getNextStatuses = (): POStatus[] => {
+    if (!po) return []
+    return allowedTransitions[po.status] ?? []
+  }
+
+  const handleStatusChange = async (newStatus: POStatus) => {
+    if (!po) return
+    if (editorMode === "edit" || hasStagedChanges) return
+    const allowed = allowedTransitions[po.status] ?? []
+    if (!allowed.includes(newStatus)) return
+    try {
+      await api.purchaseOrders.update(poId, { status: newStatus })
+      fetchPO()
+      onUpdate?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update status")
+    }
+  }
+
+  const handleClonePO = async () => {
+    setIsCloning(true)
+    setCloneConfirmOpen(false)
+    try {
+      const clonedPO = await api.purchaseOrders.clone(poId)
+      onUpdate?.()
+      if (onSelectPO) {
+        onSelectPO(clonedPO.id)
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to clone purchase order")
+    } finally {
+      setIsCloning(false)
+    }
+  }
+
+  // ===== Calculation Functions =====
 
   const getLineItemDescription = (item: POLineItem): string => {
     if (item.item_type === "part" && item.part) {
       return `${item.part.part_number} - ${item.part.description}`
     }
-    return item.description || "Miscellaneous"
+    return getDisplayDescription(item) || item.description || "Miscellaneous"
   }
 
   const getLineItemTotal = (item: POLineItem): number => {
-    return (item.unit_price || 0) * item.quantity
+    return getDisplayUnitPrice(item) * getDisplayQuantity(item)
   }
 
-  const calculateTotal = (): number => {
-    if (!po) return 0
-    return po.line_items.reduce((sum, item) => sum + getLineItemTotal(item), 0)
+  const getLineItemVariance = (item: POLineItem): number | null => {
+    if (item.qty_received > 0 && item.actual_unit_price != null) {
+      return (item.actual_unit_price - getDisplayUnitPrice(item)) * item.qty_received
+    }
+    return null
   }
+
+  const calculateTotalOrdered = (): number => {
+    if (!po) return 0
+    let total = po.line_items
+      .filter(item => !stagedDeletes.has(item.id))
+      .reduce((sum, item) => sum + getLineItemTotal(item), 0)
+    // Add staged adds
+    total += stagedAdds.reduce((sum, item) => sum + (item.unit_price ?? 0) * item.quantity, 0)
+    return total
+  }
+
+  const calculateTotalActual = (): number => {
+    if (!po) return 0
+    let total = po.line_items
+      .filter(item => !stagedDeletes.has(item.id))
+      .reduce((sum, item) => {
+        const receivedCost = item.qty_received * (item.actual_unit_price ?? getDisplayUnitPrice(item))
+        const pendingCost = getDisplayPending(item) * getDisplayUnitPrice(item)
+        return sum + receivedCost + pendingCost
+      }, 0)
+    // Include staged adds (all pending, none received)
+    total += stagedAdds.reduce((sum, item) => sum + (item.unit_price ?? 0) * item.quantity, 0)
+    return total
+  }
+
+  const calculateTotalVariance = (): number => {
+    return calculateTotalActual() - calculateTotalOrdered()
+  }
+
+  const calculateVariancePercentage = (): number => {
+    const ordered = calculateTotalOrdered()
+    if (ordered === 0) return 0
+    return (calculateTotalVariance() / ordered) * 100
+  }
+
+  const getSectionItems = (type: POLineItemType): POLineItem[] => {
+    if (!po) return []
+    return po.line_items.filter(item => item.item_type === type)
+  }
+
+  const getSectionStagedAdds = (type: POLineItemType): StagedPOAdd[] => {
+    return stagedAdds.filter(item => item.item_type === type)
+  }
+
+  // Get the display pending value: for items with no receipts, use staged quantity if available
+  const getDisplayPending = (item: POLineItem): number => {
+    if (editorMode === "edit" && item.qty_received === 0) {
+      // For Draft POs with no receipts, pending = staged quantity (since pending = ordered - received)
+      return getDisplayQuantity(item)
+    }
+    return item.qty_pending
+  }
+
+  const getSectionProgress = (items: POLineItem[], sectionAdds: StagedPOAdd[] = []): { received: number; pending: number; total: number } => {
+    const activeItems = items.filter(item => !stagedDeletes.has(item.id))
+    let total = activeItems.reduce((sum, item) => sum + getDisplayQuantity(item), 0)
+    const received = activeItems.reduce((sum, item) => sum + item.qty_received, 0)
+    let pending = activeItems.reduce((sum, item) => sum + getDisplayPending(item), 0)
+    // Include staged adds: all quantity is pending (none received yet)
+    const addsTotal = sectionAdds.reduce((sum, item) => sum + item.quantity, 0)
+    total += addsTotal
+    pending += addsTotal
+    return { received, pending, total }
+  }
+
+  // ===== Utility Functions =====
 
   const getTypeIcon = (type: POLineItemType) => {
     switch (type) {
@@ -158,6 +691,339 @@ export function POEditor({ poId, onUpdate }: POEditorProps) {
     }
   }
 
+  const getStatusBadgeColor = (status: POStatus): string => {
+    switch (status) {
+      case "Draft":
+        return "bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 border-yellow-300 dark:border-yellow-700"
+      case "Sent":
+        return "bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 border-blue-300 dark:border-blue-700"
+      case "Received":
+        return "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 border-green-300 dark:border-green-700"
+      case "Closed":
+        return "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 border-gray-300 dark:border-gray-700"
+    }
+  }
+
+  const formatCurrency = (value: number): string => {
+    return `$${value.toFixed(2)}`
+  }
+
+  const formatVariance = (variance: number): string => {
+    if (variance === 0) return "$0.00"
+    const sign = variance > 0 ? "+" : ""
+    return `${sign}$${variance.toFixed(2)}`
+  }
+
+  const getVarianceColor = (variance: number): string => {
+    if (variance < 0) return "text-green-600 dark:text-green-400"
+    if (variance > 0) return "text-red-600 dark:text-red-400"
+    return "text-muted-foreground"
+  }
+
+  // ===== Stacked Progress Component =====
+
+  const StackedProgress = ({ items, sectionAdds = [] }: { items: POLineItem[]; sectionAdds?: StagedPOAdd[] }) => {
+    const { received, total } = getSectionProgress(items, sectionAdds)
+
+    if (total === 0) return null
+
+    const receivedPercent = (received / total) * 100
+    const pendingPercent = ((total - received) / total) * 100
+
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="h-2 w-32 bg-muted rounded-full overflow-hidden flex">
+              {/* Received portion - solid green */}
+              <div
+                className="h-full bg-green-600 dark:bg-green-500"
+                style={{ width: `${receivedPercent}%` }}
+              />
+              {/* Pending portion - gray */}
+              <div
+                className="h-full bg-gray-300 dark:bg-gray-600"
+                style={{ width: `${pendingPercent}%` }}
+              />
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>{received} of {total} received</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    )
+  }
+
+  // ===== Section Rendering =====
+
+  const renderLineItemSection = (
+    title: string,
+    items: POLineItem[],
+    type: POLineItemType,
+    icon: React.ReactNode,
+    addButtonLabel: string
+  ) => {
+    const sectionAdds = getSectionStagedAdds(type)
+    const hasItems = items.length > 0 || sectionAdds.length > 0
+
+    return (
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-4">
+              <CardTitle className="text-base flex items-center gap-2">
+                {icon}
+                {title}
+              </CardTitle>
+              {(items.length > 0 || sectionAdds.length > 0) && <StackedProgress items={items} sectionAdds={sectionAdds} />}
+            </div>
+            <div className="flex gap-2">
+              {editorMode === "edit" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openAddDialog(type)}
+                  className="gap-2"
+                >
+                  <Plus className="h-4 w-4" />
+                  {addButtonLabel}
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {!hasItems ? (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No {title.toLowerCase()} items yet.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Description</TableHead>
+                  <TableHead className="text-right">Qty Ordered</TableHead>
+                  <TableHead className="text-right">Qty Pending</TableHead>
+                  <TableHead className="text-right">Qty Received</TableHead>
+                  <TableHead className="text-right">Unit Price</TableHead>
+                  <TableHead className="text-right">Actual Price</TableHead>
+                  <TableHead className="text-right">Variance</TableHead>
+                  <TableHead className="text-right">Total</TableHead>
+                  {editorMode === "edit" && (
+                    <TableHead className="text-right">Actions</TableHead>
+                  )}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {/* Existing items */}
+                {items.map((item) => {
+                  const isDeleted = stagedDeletes.has(item.id)
+                  const isEdited = stagedEdits.has(item.id)
+                  const editedItem = stagedEdits.get(item.id)
+                  const variance = getLineItemVariance(item)
+
+                  return (
+                    <TableRow
+                      key={item.id}
+                      className={`
+                        ${isEdited && !isDeleted ? "border-l-4 border-l-blue-500 dark:border-l-blue-400" : ""}
+                        ${isDeleted ? "border-l-4 border-l-red-500 dark:border-l-red-400 bg-red-50/50 dark:bg-red-950/50 line-through opacity-60" : ""}
+                      `}
+                    >
+                      {/* Description */}
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{getLineItemDescription(item)}</span>
+                          {isEdited && !isDeleted && (
+                            <Badge variant="outline" className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 border-blue-300">
+                              Edited
+                            </Badge>
+                          )}
+                          {isDeleted && (
+                            <Badge variant="outline" className="text-xs bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300 border-red-300">
+                              Deleted
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+
+                      {/* Qty Ordered */}
+                      <TableCell className="text-right">
+                        {editedItem?.quantity !== undefined && editedItem.quantity !== item.quantity ? (
+                          <span className="font-bold text-blue-600 dark:text-blue-400">{editedItem.quantity}</span>
+                        ) : (
+                          item.quantity
+                        )}
+                      </TableCell>
+
+                      {/* Qty Pending */}
+                      <TableCell className="text-right">
+                        {(() => {
+                          const displayPending = getDisplayPending(item)
+                          return displayPending !== item.qty_pending ? (
+                            <span className="font-bold text-blue-600 dark:text-blue-400">{displayPending}</span>
+                          ) : (
+                            item.qty_pending
+                          )
+                        })()}
+                      </TableCell>
+
+                      {/* Qty Received */}
+                      <TableCell className="text-right">
+                        {item.qty_received}
+                      </TableCell>
+
+                      {/* Unit Price */}
+                      <TableCell className="text-right">
+                        {editedItem?.unit_price !== undefined && editedItem.unit_price !== (item.unit_price ?? 0) ? (
+                          <span className="font-bold text-blue-600 dark:text-blue-400">
+                            {formatCurrency(editedItem.unit_price)}
+                          </span>
+                        ) : (
+                          formatCurrency(item.unit_price ?? 0)
+                        )}
+                      </TableCell>
+
+                      {/* Actual Price */}
+                      <TableCell className="text-right">
+                        {item.actual_unit_price != null ? formatCurrency(item.actual_unit_price) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+
+                      {/* Variance */}
+                      <TableCell className="text-right">
+                        {variance !== null ? (
+                          <span className={getVarianceColor(variance)}>
+                            {formatVariance(variance)}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+
+                      {/* Total */}
+                      <TableCell className="text-right font-medium">
+                        {formatCurrency(getLineItemTotal(item))}
+                      </TableCell>
+
+                      {/* Actions */}
+                      {editorMode === "edit" && (
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {isDeleted ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => unstageDelete(item.id)}
+                                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                title="Undo delete"
+                              >
+                                Undo
+                              </Button>
+                            ) : (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => openEditDialog(item)}
+                                  title="Edit line item"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleDeleteLine(item.id)}
+                                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                  title="Delete line item"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  )
+                })}
+
+                {/* Staged add items */}
+                {sectionAdds.map((item) => (
+                  <TableRow
+                    key={`staged-${item.tempId}`}
+                    className="border-l-4 border-l-green-500 dark:border-l-green-400 bg-green-50/30 dark:bg-green-950/30"
+                  >
+                    {/* Description */}
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">
+                          {item.item_type === "part" && item.part
+                            ? `${item.part.part_number} - ${item.part.description}`
+                            : item.description || "Miscellaneous"
+                          }
+                        </span>
+                        <Badge variant="outline" className="text-xs bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 border-green-300">
+                          New
+                        </Badge>
+                      </div>
+                    </TableCell>
+
+                    {/* Qty Ordered */}
+                    <TableCell className="text-right font-bold text-green-600 dark:text-green-400">
+                      {item.quantity}
+                    </TableCell>
+
+                    {/* Qty Pending */}
+                    <TableCell className="text-right font-bold text-green-600 dark:text-green-400">{item.quantity}</TableCell>
+
+                    {/* Qty Received */}
+                    <TableCell className="text-right text-muted-foreground">0</TableCell>
+
+                    {/* Unit Price */}
+                    <TableCell className="text-right font-bold text-green-600 dark:text-green-400">
+                      {formatCurrency(item.unit_price ?? 0)}
+                    </TableCell>
+
+                    {/* Actual Price */}
+                    <TableCell className="text-right text-muted-foreground">—</TableCell>
+
+                    {/* Variance */}
+                    <TableCell className="text-right text-muted-foreground">—</TableCell>
+
+                    {/* Total */}
+                    <TableCell className="text-right font-medium text-green-600 dark:text-green-400">
+                      {formatCurrency((item.unit_price ?? 0) * item.quantity)}
+                    </TableCell>
+
+                    {/* Actions */}
+                    {editorMode === "edit" && (
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => unstageAdd(item.tempId)}
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          title="Remove staged item"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
+
+  // ===== Loading & Error States =====
+
   if (loading) {
     return <div className="p-8 text-center text-muted-foreground">Loading...</div>
   }
@@ -172,12 +1038,37 @@ export function POEditor({ poId, onUpdate }: POEditorProps) {
     )
   }
 
+  // ===== Gather section data =====
+  const partItems = getSectionItems("part")
+  const miscItems = getSectionItems("misc")
+
+  // ===== Main Render =====
   return (
-    <div className="p-6 space-y-6">
+    <div className={`p-6 space-y-6 pb-24 rounded-lg transition-colors ${
+      editorMode === "edit"
+        ? "border-2 border-blue-500 dark:border-blue-400 bg-blue-50/30 dark:bg-blue-950/30"
+        : editorMode === "receiving"
+        ? "border-2 border-green-500 dark:border-green-400 bg-green-50/30 dark:bg-green-950/30"
+        : "border-2 border-transparent"
+    }`}>
+
+      {/* Received Banner */}
+      {hasBeenReceived && (
+        <Card className="border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950">
+          <CardContent className="py-3">
+            <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
+              <Check className="h-4 w-4" />
+              <span className="font-medium">Partially Received</span>
+              <span className="text-sm">— Some items on this PO have been received. Line item edits are restricted.</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Header */}
       <div className="flex justify-between items-start">
         <div>
-          <h2 className="text-xl font-semibold">Purchase Order #{po.id}</h2>
+          <h2 className="text-xl font-semibold">{po.po_number}</h2>
           <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
             <Building className="h-4 w-4" />
             <span>Vendor: {po.vendor.name}</span>
@@ -186,128 +1077,330 @@ export function POEditor({ poId, onUpdate }: POEditorProps) {
             Created: {new Date(po.created_at).toLocaleDateString()}
           </p>
         </div>
-        <Badge variant={po.status === "draft" ? "outline" : "default"}>
-          {po.status}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCloneConfirmOpen(true)}
+            disabled={isCloning}
+            className="gap-2"
+          >
+            <Copy className="h-4 w-4" />
+            {isCloning ? "Cloning..." : "Clone PO"}
+          </Button>
+          {getNextStatuses().length > 0 && editorMode === "view" && !hasStagedChanges ? (
+            <Select value={po.status} onValueChange={(v) => handleStatusChange(v as POStatus)}>
+              <SelectTrigger className={`w-32 ${getStatusBadgeColor(po.status)}`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={po.status}>{po.status}</SelectItem>
+                {getNextStatuses().map(status => (
+                  <SelectItem key={status} value={status}>{status}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Badge variant="outline" className={`px-3 py-1 ${getStatusBadgeColor(po.status)}`}>
+              {po.status}
+            </Badge>
+          )}
+        </div>
       </div>
 
-      {/* Add Line Item Buttons - NO LABOR */}
+      {/* Metadata Section: Order Details */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Add Line Item</CardTitle>
+          <CardTitle className="text-base">Order Details</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => openAddDialog("part")}
-              className="gap-2"
-            >
-              <Package className="h-4 w-4" />
-              Add Part
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => openAddDialog("misc")}
-              className="gap-2"
-            >
-              <FileText className="h-4 w-4" />
-              Add Misc
-            </Button>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Work Description */}
+            <div className="space-y-1">
+              <Label className="text-sm text-muted-foreground">Work Description</Label>
+              {isEditingWorkDescription ? (
+                <div className="flex flex-col gap-2">
+                  <Textarea
+                    value={workDescription}
+                    onChange={(e) => setWorkDescription(e.target.value)}
+                    placeholder="Enter work description"
+                    rows={3}
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={handleSaveWorkDescription}
+                      disabled={savingWorkDescription}
+                    >
+                      {savingWorkDescription ? "Saving..." : "Save"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setWorkDescription(po.work_description || "")
+                        setIsEditingWorkDescription(false)
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  {po.work_description ? (
+                    <span className="text-sm">{po.work_description}</span>
+                  ) : (
+                    <span className="text-sm text-muted-foreground italic">Not set</span>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    onClick={() => setIsEditingWorkDescription(true)}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Vendor PO Number */}
+            <div className="space-y-1">
+              <Label className="text-sm text-muted-foreground">Vendor PO Number</Label>
+              {isEditingVendorPo ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={vendorPoNumber}
+                    onChange={(e) => setVendorPoNumber(e.target.value)}
+                    placeholder="Enter vendor PO number"
+                    className="max-w-xs"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={handleSaveVendorPoNumber}
+                    disabled={savingVendorPo}
+                  >
+                    {savingVendorPo ? "Saving..." : "Save"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setVendorPoNumber(po.vendor_po_number || "")
+                      setIsEditingVendorPo(false)
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  {po.vendor_po_number ? (
+                    <span className="text-sm font-medium">{po.vendor_po_number}</span>
+                  ) : (
+                    <span className="text-sm text-muted-foreground italic">Not set</span>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    onClick={() => setIsEditingVendorPo(true)}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Expected Delivery Date */}
+            <div className="space-y-1">
+              <Label className="text-sm text-muted-foreground flex items-center gap-1">
+                <Calendar className="h-3 w-3" />
+                Expected Delivery Date
+              </Label>
+              {isEditingDeliveryDate ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="date"
+                    value={expectedDeliveryDate}
+                    onChange={(e) => setExpectedDeliveryDate(e.target.value)}
+                    className="max-w-xs"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={handleSaveExpectedDeliveryDate}
+                    disabled={savingDeliveryDate}
+                  >
+                    {savingDeliveryDate ? "Saving..." : "Save"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setExpectedDeliveryDate(po.expected_delivery_date || "")
+                      setIsEditingDeliveryDate(false)
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  {po.expected_delivery_date ? (
+                    <span className="text-sm font-medium">
+                      {new Date(po.expected_delivery_date).toLocaleDateString()}
+                    </span>
+                  ) : (
+                    <span className="text-sm text-muted-foreground italic">Not set</span>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    onClick={() => setIsEditingDeliveryDate(true)}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
-          <p className="text-xs text-muted-foreground mt-2">
-            Note: Purchase orders can only include parts and miscellaneous items.
+        </CardContent>
+      </Card>
+
+      {/* Parts Section */}
+      {renderLineItemSection("Parts", partItems, "part", <Package className="h-4 w-4" />, "Add Part")}
+
+      {/* Misc Section */}
+      {renderLineItemSection("Miscellaneous", miscItems, "misc", <FileText className="h-4 w-4" />, "Add Misc")}
+
+      {/* Summary Section */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Cost Summary</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Total Ordered:</span>
+              <span className="font-medium">{formatCurrency(calculateTotalOrdered())}</span>
+            </div>
+            {po.line_items.some(item => item.qty_received > 0) && (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Total Actual:</span>
+                  <span className="font-medium">{formatCurrency(calculateTotalActual())}</span>
+                </div>
+                <Separator />
+                <div className="flex justify-between items-center">
+                  <span className="font-semibold">Total Variance:</span>
+                  <span className={`font-bold ${getVarianceColor(calculateTotalVariance())}`}>
+                    {formatVariance(calculateTotalVariance())}
+                    <span className="text-sm ml-2">({calculateVariancePercentage().toFixed(1)}%)</span>
+                  </span>
+                </div>
+              </>
+            )}
+            {!po.line_items.some(item => item.qty_received > 0) && (
+              <>
+                <Separator />
+                <div className="flex justify-between items-center">
+                  <span className="font-semibold text-lg">Total:</span>
+                  <span className="text-2xl font-bold">{formatCurrency(calculateTotalOrdered())}</span>
+                </div>
+              </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Audit Trail Placeholder */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Clock className="h-4 w-4" />
+            Audit Trail
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Version {po.current_version} — Audit trail will be implemented in the next phase.
           </p>
         </CardContent>
       </Card>
 
-      {/* Line Items Table */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Line Items</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {po.line_items.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-8">
-              No line items yet. Add items using the buttons above.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Unit Price</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {po.line_items.map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell>
-                      <Badge
-                        variant={getTypeBadgeVariant(item.item_type) as "secondary" | "outline"}
-                        className="gap-1"
-                      >
-                        {getTypeIcon(item.item_type)}
-                        {item.item_type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{getLineItemDescription(item)}</TableCell>
-                    <TableCell className="text-right">{item.quantity}</TableCell>
-                    <TableCell className="text-right">
-                      ${(item.unit_price || 0).toFixed(2)}
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
-                      ${getLineItemTotal(item).toFixed(2)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteLine(item.id)}
-                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {/* Total Row */}
-                <TableRow className="bg-muted/50">
-                  <TableCell colSpan={4} className="text-right font-semibold">
-                    Total:
-                  </TableCell>
-                  <TableCell className="text-right font-bold text-lg">
-                    ${calculateTotal().toFixed(2)}
-                  </TableCell>
-                  <TableCell />
-                </TableRow>
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      {/* ===== Floating Action Buttons ===== */}
+      <div className="fixed bottom-6 right-6 z-50">
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex gap-2">
+            {/* View Mode: Enter Edit Mode button (only for Draft POs that haven't been received) */}
+            {editorMode === "view" && po.status === "Draft" && !hasBeenReceived && (
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={enterEditMode}
+                className="shadow-lg gap-2"
+              >
+                <Pencil className="h-5 w-5" />
+                Edit PO
+              </Button>
+            )}
+
+            {/* Edit Mode: Discard, Preview, and Commit buttons */}
+            {editorMode === "edit" && (
+              <>
+                <Button
+                  size="lg"
+                  variant="outline"
+                  onClick={() => exitEditMode()}
+                  className="shadow-lg gap-2"
+                >
+                  <X className="h-5 w-5" />
+                  Discard
+                </Button>
+                <Button
+                  size="lg"
+                  variant="secondary"
+                  onClick={() => setEditPreviewOpen(true)}
+                  disabled={!hasStagedChanges}
+                  className="shadow-lg gap-2"
+                >
+                  <Eye className="h-5 w-5" />
+                  Preview
+                </Button>
+                <Button
+                  size="lg"
+                  onClick={() => setCommitConfirmOpen(true)}
+                  disabled={!hasStagedChanges || isCommitting}
+                  className="shadow-lg gap-2 bg-blue-600 hover:bg-blue-700"
+                >
+                  <GitCommit className="h-5 w-5" />
+                  {isCommitting ? "Committing..." : `Commit${hasStagedChanges ? ` (${stagedChangesCount})` : ""}`}
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ===== Dialogs ===== */}
 
       {/* Add Line Item Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              {getTypeIcon(dialogType)}
-              Add {dialogType.charAt(0).toUpperCase() + dialogType.slice(1)}
+              {getTypeIcon(addDialogType)}
+              Add {addDialogType.charAt(0).toUpperCase() + addDialogType.slice(1)}
             </DialogTitle>
             <DialogDescription>
-              Add a {dialogType} line item to this purchase order.
+              Add a {addDialogType} line item to this purchase order.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 pt-4">
-            {dialogType === "part" && (
+            {addDialogType === "part" && (
               <div className="space-y-2">
                 <Label>Part</Label>
                 <SearchableSelect<Part>
@@ -333,7 +1426,7 @@ export function POEditor({ poId, onUpdate }: POEditorProps) {
               </div>
             )}
 
-            {dialogType === "misc" && (
+            {addDialogType === "misc" && (
               <>
                 <div className="space-y-2">
                   <Label>Description</Label>
@@ -371,8 +1464,8 @@ export function POEditor({ poId, onUpdate }: POEditorProps) {
               onClick={handleAddLineItem}
               className="w-full"
               disabled={
-                (dialogType === "part" && (!selectedPartId || parts.length === 0)) ||
-                (dialogType === "misc" && !miscDescription)
+                (addDialogType === "part" && (!selectedPartId || parts.length === 0)) ||
+                (addDialogType === "misc" && !miscDescription)
               }
             >
               <Plus className="h-4 w-4 mr-2" />
@@ -381,6 +1474,271 @@ export function POEditor({ poId, onUpdate }: POEditorProps) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Edit Line Item Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-4 w-4" />
+              Edit Line Item
+            </DialogTitle>
+            <DialogDescription>
+              Modify the line item details. Changes are staged until you commit.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 pt-4">
+            {editingLineItem && (
+              <>
+                {/* Show item description (read-only for parts) */}
+                <div className="p-3 bg-muted/50 rounded-md">
+                  <span className="text-sm font-medium">
+                    {editingLineItem.item_type === "part" && editingLineItem.part
+                      ? `${editingLineItem.part.part_number} - ${editingLineItem.part.description}`
+                      : editingLineItem.description || "Miscellaneous"
+                    }
+                  </span>
+                </div>
+
+                {/* Description (editable for misc items) */}
+                {editingLineItem.item_type === "misc" && (
+                  <div className="space-y-2">
+                    <Label>Description</Label>
+                    <Input
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      placeholder="Enter description"
+                    />
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label>Quantity</Label>
+                  <Input
+                    type="number"
+                    step="1"
+                    min="1"
+                    value={editQuantity}
+                    onChange={(e) => setEditQuantity(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Unit Price</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={editUnitPrice}
+                    onChange={(e) => setEditUnitPrice(e.target.value)}
+                    placeholder="0.00"
+                  />
+                </div>
+              </>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleEditLineItem}>
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Discard Changes Confirmation Dialog */}
+      <AlertDialog open={discardConfirmOpen} onOpenChange={setDiscardConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Discard Changes?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              You have {stagedChangesCount} unsaved change{stagedChangesCount !== 1 ? "s" : ""}. Are you sure you want to discard all changes? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Editing</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => exitEditMode(true)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Discard Changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Commit Changes Confirmation Dialog */}
+      <AlertDialog open={commitConfirmOpen} onOpenChange={setCommitConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <GitCommit className="h-5 w-5 text-blue-500" />
+              Commit Changes?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              You are about to commit {stagedChangesCount} change{stagedChangesCount !== 1 ? "s" : ""} to this purchase order:
+              <ul className="mt-2 space-y-1 text-sm">
+                {stagedAdds.length > 0 && (
+                  <li className="text-green-600 dark:text-green-400">• {stagedAdds.length} item{stagedAdds.length !== 1 ? "s" : ""} added</li>
+                )}
+                {stagedEdits.size > 0 && (
+                  <li className="text-blue-600 dark:text-blue-400">• {stagedEdits.size} item{stagedEdits.size !== 1 ? "s" : ""} modified</li>
+                )}
+                {stagedDeletes.size > 0 && (
+                  <li className="text-red-600 dark:text-red-400">• {stagedDeletes.size} item{stagedDeletes.size !== 1 ? "s" : ""} deleted</li>
+                )}
+              </ul>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleCommitChanges}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              Commit Changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Edit Preview Dialog */}
+      <Dialog open={editPreviewOpen} onOpenChange={setEditPreviewOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5" />
+              Preview Changes
+            </DialogTitle>
+            <DialogDescription>
+              Review your staged changes before committing.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {stagedAdds.length > 0 && (
+              <div>
+                <h4 className="font-medium text-green-600 dark:text-green-400 mb-2">Added Items ({stagedAdds.length})</h4>
+                <div className="space-y-2">
+                  {stagedAdds.map(item => (
+                    <div key={item.tempId} className="p-2 bg-green-50 dark:bg-green-950 rounded border border-green-200 dark:border-green-800">
+                      <span className="font-medium">
+                        {item.item_type === "part" && item.part
+                          ? `${item.part.part_number} - ${item.part.description}`
+                          : item.description || "Miscellaneous"
+                        }
+                      </span>
+                      <span className="text-muted-foreground ml-2">× {item.quantity}</span>
+                      <span className="text-muted-foreground ml-2">@ {formatCurrency(item.unit_price ?? 0)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {stagedEdits.size > 0 && (
+              <div>
+                <h4 className="font-medium text-blue-600 dark:text-blue-400 mb-2">Modified Items ({stagedEdits.size})</h4>
+                <div className="space-y-2">
+                  {Array.from(stagedEdits.entries()).map(([id, edit]) => (
+                    <div key={id} className="p-2 bg-blue-50 dark:bg-blue-950 rounded border border-blue-200 dark:border-blue-800">
+                      <span className="font-medium">
+                        {edit.originalItem.part?.part_number
+                          ? `${edit.originalItem.part.part_number} - ${edit.originalItem.part.description}`
+                          : edit.originalItem.description || "Item"
+                        }
+                      </span>
+                      <div className="text-sm text-muted-foreground mt-1">
+                        {edit.quantity !== undefined && (
+                          <div>Qty: {edit.originalItem.quantity} → {edit.quantity}</div>
+                        )}
+                        {edit.unit_price !== undefined && (
+                          <div>Price: {formatCurrency(edit.originalItem.unit_price ?? 0)} → {formatCurrency(edit.unit_price)}</div>
+                        )}
+                        {edit.description !== undefined && (
+                          <div>Description: "{edit.originalItem.description}" → "{edit.description}"</div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {stagedDeletes.size > 0 && (
+              <div>
+                <h4 className="font-medium text-red-600 dark:text-red-400 mb-2">Deleted Items ({stagedDeletes.size})</h4>
+                <div className="space-y-2">
+                  {Array.from(stagedDeletes).map(id => {
+                    const item = po?.line_items.find(li => li.id === id)
+                    return item ? (
+                      <div key={id} className="p-2 bg-red-50 dark:bg-red-950 rounded border border-red-200 dark:border-red-800 line-through opacity-60">
+                        <span className="font-medium">
+                          {item.part?.part_number
+                            ? `${item.part.part_number} - ${item.part.description}`
+                            : item.description || "Item"
+                          }
+                        </span>
+                        <span className="text-muted-foreground ml-2">× {item.quantity}</span>
+                      </div>
+                    ) : null
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditPreviewOpen(false)}>
+              Close
+            </Button>
+            <Button onClick={() => { setEditPreviewOpen(false); setCommitConfirmOpen(true); }} className="bg-blue-600 hover:bg-blue-700">
+              Commit Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* PO Changed Warning Dialog */}
+      <AlertDialog open={poChangedDialogOpen} onOpenChange={setPOChangedDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Purchase Order Data Changed
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This purchase order has been modified since you started editing. Your staged changes have been cleared to ensure data accuracy. Please review the updated PO and re-apply your edits.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setPOChangedDialogOpen(false)}>
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Clone Confirmation Dialog */}
+      <AlertDialog open={cloneConfirmOpen} onOpenChange={setCloneConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clone Purchase Order?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will create a new purchase order with the same vendor, line items, and metadata as {po.po_number}. The new PO will be in Draft status with no receiving history.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleClonePO}>
+              Confirm Clone
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
