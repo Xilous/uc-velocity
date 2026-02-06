@@ -222,6 +222,9 @@ export interface QuoteLineItemUpdate {
 // ===== Quotes =====
 export type QuoteStatus = 'Active' | 'Invoiced';
 
+// ===== Purchase Orders Status =====
+export type POStatus = 'Draft' | 'Sent' | 'Received' | 'Closed';
+
 export interface Quote {
   id: number;
   project_id: number;
@@ -261,6 +264,9 @@ export interface POLineItem {
   description?: string;
   quantity: number;
   unit_price?: number;
+  qty_pending: number;
+  qty_received: number;
+  actual_unit_price?: number | null;
   part?: Part;
 }
 
@@ -278,7 +284,13 @@ export interface PurchaseOrder {
   project_id: number;
   vendor_id: number;
   created_at: string;
-  status: string;
+  po_sequence: number;
+  po_number: string;
+  current_version: number;
+  status: POStatus;
+  work_description?: string | null;
+  vendor_po_number?: string | null;
+  expected_delivery_date?: string | null;
   vendor: Profile;
   line_items: POLineItem[];
 }
@@ -286,7 +298,115 @@ export interface PurchaseOrder {
 export interface PurchaseOrderCreate {
   project_id: number;
   vendor_id: number;
-  status?: string;
+  status?: POStatus;
+  work_description?: string;
+  vendor_po_number?: string;
+  expected_delivery_date?: string;
+}
+
+export interface PurchaseOrderUpdate {
+  status?: POStatus;
+  work_description?: string | null;
+  vendor_po_number?: string | null;
+  expected_delivery_date?: string | null;
+}
+
+// ===== PO Receiving =====
+export interface POReceivingLineItem {
+  id: number;
+  receiving_id: number;
+  po_line_item_id: number;
+  item_type: POLineItemType;
+  description: string;
+  part_id?: number;
+  unit_price: number;
+  actual_unit_price: number;
+  qty_ordered: number;
+  qty_received_this_receiving: number;
+  qty_received_total: number;
+  qty_pending_after: number;
+}
+
+export interface POReceiving {
+  id: number;
+  purchase_order_id: number;
+  created_at: string;
+  received_date: string;
+  notes?: string | null;
+  voided_at?: string | null;
+  voided_by_snapshot_id?: number | null;
+  line_items: POReceivingLineItem[];
+}
+
+export interface POReceivingLineItemCreate {
+  po_line_item_id: number;
+  qty_received: number;
+  actual_unit_price?: number;
+}
+
+export interface POReceivingCreate {
+  received_date: string;
+  notes?: string;
+  line_items: POReceivingLineItemCreate[];
+}
+
+// ===== PO Snapshots =====
+export interface POLineItemSnapshot {
+  id: number;
+  snapshot_id: number;
+  original_line_item_id?: number;
+  item_type: POLineItemType;
+  part_id?: number;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  qty_pending: number;
+  qty_received: number;
+  actual_unit_price?: number;
+  is_deleted: boolean;
+}
+
+export type POSnapshotActionType = 'create' | 'edit' | 'delete' | 'receive' | 'status_change' | 'revert';
+
+export interface POSnapshot {
+  id: number;
+  purchase_order_id: number;
+  version: number;
+  action_type: POSnapshotActionType;
+  action_description?: string;
+  created_at: string;
+  receiving_id?: number;
+  line_items_states: POLineItemSnapshot[];
+}
+
+// ===== PO Revert Preview =====
+export interface PORevertPreview {
+  target_version: number;
+  receivings_to_void: POReceiving[];
+  changes_summary: string;
+}
+
+// ===== PO Commit Edits =====
+export interface StagedPOLineItemChange {
+  action: 'add' | 'edit' | 'delete';
+  line_item_id?: number;
+  item_type?: POLineItemType;
+  part_id?: number;
+  description?: string;
+  quantity?: number;
+  unit_price?: number;
+}
+
+export interface POCommitEditsRequest {
+  changes: StagedPOLineItemChange[];
+  commit_message?: string;
+}
+
+export interface POCommitEditsResponse {
+  success: boolean;
+  message: string;
+  purchase_order: PurchaseOrder;
+  snapshot_version: number;
 }
 
 // ===== Invoice Line Items =====
