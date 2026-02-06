@@ -891,6 +891,7 @@ def create_po_receiving(po_id: int, receiving_data: POReceivingCreate, db: Sessi
             qty_pending_after=line_item.qty_pending - receiving_line_data.qty_received
         )
         db.add(receiving_line_item)
+        db.flush()
 
         # Update PO line item aggregates
         line_item.qty_received += receiving_line_data.qty_received

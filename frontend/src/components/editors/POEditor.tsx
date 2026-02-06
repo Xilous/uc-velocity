@@ -400,7 +400,7 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
   }
 
   const handleAddLineItem = async () => {
-    const qty = parseFloat(quantity) || 1
+    const qty = Math.max(1, parseFloat(quantity) || 0)
 
     if (addDialogType === "part") {
       if (!selectedPartId) return

@@ -315,7 +315,7 @@ export interface PurchaseOrderUpdate {
 export interface POReceivingLineItem {
   id: number;
   receiving_id: number;
-  po_line_item_id: number;
+  po_line_item_id: number | null;
   item_type: POLineItemType;
   description: string;
   part_id?: number;
