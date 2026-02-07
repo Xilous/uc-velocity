@@ -21,34 +21,50 @@ def ensure_po_columns():
 
     create_all() can create new tables but cannot ALTER existing ones.
     This runs idempotent DDL to add any missing columns before the ORM
-    starts querying them.
+    starts querying them.  Column additions are committed first so that
+    a subsequent enum conversion error cannot roll them back.
     """
     with engine.connect() as conn:
-        # purchase_orders columns
+        # Step 1: Add missing columns (commit immediately)
         conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS po_sequence INTEGER"))
         conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS current_version INTEGER DEFAULT 0 NOT NULL"))
         conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS work_description VARCHAR"))
         conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS vendor_po_number VARCHAR"))
         conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS expected_delivery_date TIMESTAMP"))
-
-        # po_line_items columns
         conn.execute(text("ALTER TABLE po_line_items ADD COLUMN IF NOT EXISTS qty_pending INTEGER DEFAULT 0 NOT NULL"))
         conn.execute(text("ALTER TABLE po_line_items ADD COLUMN IF NOT EXISTS qty_received INTEGER DEFAULT 0 NOT NULL"))
         conn.execute(text("ALTER TABLE po_line_items ADD COLUMN IF NOT EXISTS actual_unit_price FLOAT"))
-
-        # POStatus enum and status column type
-        conn.execute(text("DO $$ BEGIN CREATE TYPE postatus AS ENUM ('Draft', 'Sent', 'Received', 'Closed'); EXCEPTION WHEN duplicate_object THEN NULL; END $$"))
-        result = conn.execute(text(
-            "SELECT udt_name FROM information_schema.columns "
-            "WHERE table_name = 'purchase_orders' AND column_name = 'status'"
-        ))
-        row = result.fetchone()
-        if row and row[0] != 'postatus':
-            conn.execute(text("ALTER TABLE purchase_orders ALTER COLUMN status TYPE postatus USING status::postatus"))
-            conn.execute(text("ALTER TABLE purchase_orders ALTER COLUMN status SET DEFAULT 'Draft'"))
-
         conn.commit()
-        print("[STARTUP] PO versioning columns ensured")
+        print("[STARTUP] PO columns ensured")
+
+    # Step 2: Enum conversion (separate transaction — non-critical)
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "DO $$ BEGIN "
+                "CREATE TYPE postatus AS ENUM ('Draft', 'Sent', 'Received', 'Closed'); "
+                "EXCEPTION WHEN duplicate_object THEN NULL; END $$"
+            ))
+            result = conn.execute(text(
+                "SELECT udt_name FROM information_schema.columns "
+                "WHERE table_name = 'purchase_orders' AND column_name = 'status'"
+            ))
+            row = result.fetchone()
+            if row and row[0] != 'postatus':
+                # Delete any PO data with old-format status before converting
+                conn.execute(text("DELETE FROM po_line_items"))
+                conn.execute(text("DELETE FROM purchase_orders"))
+                conn.execute(text(
+                    "ALTER TABLE purchase_orders ALTER COLUMN status TYPE postatus "
+                    "USING status::postatus"
+                ))
+                conn.execute(text(
+                    "ALTER TABLE purchase_orders ALTER COLUMN status SET DEFAULT 'Draft'::postatus"
+                ))
+                print("[STARTUP] Status column converted to postatus enum")
+            conn.commit()
+    except Exception as e:
+        print(f"[STARTUP] Enum conversion skipped (non-critical): {e}")
 
 
 # Ensure columns exist on existing tables before create_all
