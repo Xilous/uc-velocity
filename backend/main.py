@@ -10,9 +10,53 @@ if env_path.exists():
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from sqlalchemy import text
 from database import engine, Base, SessionLocal
 from routes import parts, labor, profiles, projects, quotes, purchase_orders, discount_codes, miscellaneous, invoices
 from seed import seed_system_items
+
+
+def ensure_po_columns():
+    """Ensure PO versioning columns exist on existing tables.
+
+    create_all() can create new tables but cannot ALTER existing ones.
+    This runs idempotent DDL to add any missing columns before the ORM
+    starts querying them.
+    """
+    with engine.connect() as conn:
+        # purchase_orders columns
+        conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS po_sequence INTEGER"))
+        conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS current_version INTEGER DEFAULT 0 NOT NULL"))
+        conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS work_description VARCHAR"))
+        conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS vendor_po_number VARCHAR"))
+        conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS expected_delivery_date TIMESTAMP"))
+
+        # po_line_items columns
+        conn.execute(text("ALTER TABLE po_line_items ADD COLUMN IF NOT EXISTS qty_pending INTEGER DEFAULT 0 NOT NULL"))
+        conn.execute(text("ALTER TABLE po_line_items ADD COLUMN IF NOT EXISTS qty_received INTEGER DEFAULT 0 NOT NULL"))
+        conn.execute(text("ALTER TABLE po_line_items ADD COLUMN IF NOT EXISTS actual_unit_price FLOAT"))
+
+        # POStatus enum and status column type
+        conn.execute(text("DO $$ BEGIN CREATE TYPE postatus AS ENUM ('Draft', 'Sent', 'Received', 'Closed'); EXCEPTION WHEN duplicate_object THEN NULL; END $$"))
+        result = conn.execute(text(
+            "SELECT udt_name FROM information_schema.columns "
+            "WHERE table_name = 'purchase_orders' AND column_name = 'status'"
+        ))
+        row = result.fetchone()
+        if row and row[0] != 'postatus':
+            conn.execute(text("ALTER TABLE purchase_orders ALTER COLUMN status TYPE postatus USING status::postatus"))
+            conn.execute(text("ALTER TABLE purchase_orders ALTER COLUMN status SET DEFAULT 'Draft'"))
+
+        conn.commit()
+        print("[STARTUP] PO versioning columns ensured")
+
+
+# Ensure columns exist on existing tables before create_all
+try:
+    ensure_po_columns()
+except Exception as e:
+    # Table may not exist yet on fresh install — create_all will handle it
+    print(f"[STARTUP] Skipped column check (fresh install?): {e}")
 
 # Create all database tables (idempotent - safe fallback for fresh installs)
 Base.metadata.create_all(bind=engine)
