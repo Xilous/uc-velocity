@@ -32,7 +32,13 @@ async function request<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || `API error: ${response.status}`);
+    let message = `API error: ${response.status}`;
+    if (typeof error.detail === 'string') {
+      message = error.detail;
+    } else if (Array.isArray(error.detail)) {
+      message = error.detail.map((e: any) => e.msg).join('; ');
+    }
+    throw new Error(message);
   }
 
   return response.json();
