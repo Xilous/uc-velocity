@@ -651,7 +651,7 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
     setIsSubmittingReceiving(true)
     try {
       const payload: POReceivingCreate = {
-        received_date: receivedDate,
+        received_date: `${receivedDate}T00:00:00`,
         line_items: receivingLineItems,
       }
       await api.purchaseOrders.createReceiving(poId, payload)
