@@ -18,6 +18,7 @@ import type {
 // API base URL - configurable via environment variable for production
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
+/** Fetch wrapper that handles JSON serialization and extracts error details from FastAPI responses. */
 async function request<T>(
   endpoint: string,
   options: RequestInit = {}

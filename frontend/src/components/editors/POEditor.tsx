@@ -631,6 +631,7 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
     setStagedReceivings(newMap)
   }
 
+  /** Submit staged receiving quantities and actual prices to the backend. */
   const handleSubmitReceiving = async () => {
     if (!po) return
 
