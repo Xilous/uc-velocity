@@ -38,11 +38,13 @@ def ensure_po_columns():
         print("[STARTUP] PO columns ensured")
 
     # Step 2: Enum conversion (separate transaction — non-critical)
+    # SQLAlchemy's Enum(POStatus) uses member NAMES as PG enum values:
+    #   POStatus.draft -> 'draft', POStatus.sent -> 'sent', etc.
     try:
         with engine.connect() as conn:
             conn.execute(text(
                 "DO $$ BEGIN "
-                "CREATE TYPE postatus AS ENUM ('Draft', 'Sent', 'Received', 'Closed'); "
+                "CREATE TYPE postatus AS ENUM ('draft', 'sent', 'received', 'closed'); "
                 "EXCEPTION WHEN duplicate_object THEN NULL; END $$"
             ))
             result = conn.execute(text(
@@ -51,15 +53,15 @@ def ensure_po_columns():
             ))
             row = result.fetchone()
             if row and row[0] != 'postatus':
-                # Delete any PO data with old-format status before converting
-                conn.execute(text("DELETE FROM po_line_items"))
-                conn.execute(text("DELETE FROM purchase_orders"))
+                conn.execute(text(
+                    "UPDATE purchase_orders SET status = lower(status)"
+                ))
                 conn.execute(text(
                     "ALTER TABLE purchase_orders ALTER COLUMN status TYPE postatus "
                     "USING status::postatus"
                 ))
                 conn.execute(text(
-                    "ALTER TABLE purchase_orders ALTER COLUMN status SET DEFAULT 'Draft'::postatus"
+                    "ALTER TABLE purchase_orders ALTER COLUMN status SET DEFAULT 'draft'::postatus"
                 ))
                 print("[STARTUP] Status column converted to postatus enum")
             conn.commit()

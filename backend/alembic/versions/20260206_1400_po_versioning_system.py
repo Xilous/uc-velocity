@@ -68,7 +68,7 @@ def upgrade():
     print("[CLEANUP] Deleted existing test PO data")
 
     # Step 2.2: Create POStatus Enum (checkfirst=True makes this idempotent)
-    postatus_enum = sa.Enum('Draft', 'Sent', 'Received', 'Closed', name='postatus', create_type=True)
+    postatus_enum = sa.Enum('draft', 'sent', 'received', 'closed', name='postatus', create_type=True)
     postatus_enum.create(op.get_bind(), checkfirst=True)
 
     # Step 2.3: Create New Tables (skip if already exist from create_all fallback)
@@ -182,8 +182,8 @@ def upgrade():
         op.alter_column(
             'purchase_orders',
             'status',
-            type_=sa.Enum('Draft', 'Sent', 'Received', 'Closed', name='postatus'),
-            server_default='Draft',
+            type_=sa.Enum('draft', 'sent', 'received', 'closed', name='postatus'),
+            server_default='draft',
             postgresql_using='status::postatus'
         )
         print("[ALTERED] purchase_orders.status to POStatus enum")

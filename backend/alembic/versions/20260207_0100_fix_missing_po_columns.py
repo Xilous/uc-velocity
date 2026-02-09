@@ -39,7 +39,8 @@ def upgrade():
     print("[006] po_line_items columns ensured")
 
     # ── POStatus enum: ensure it exists ──
-    postatus_enum = sa.Enum('Draft', 'Sent', 'Received', 'Closed', name='postatus', create_type=True)
+    # ── POStatus enum: ensure it exists (lowercase values match SQLAlchemy member names) ──
+    postatus_enum = sa.Enum('draft', 'sent', 'received', 'closed', name='postatus', create_type=True)
     postatus_enum.create(conn, checkfirst=True)
 
     # ── purchase_orders.status: ensure it uses the enum type ──
@@ -49,13 +50,14 @@ def upgrade():
     ))
     row = result.fetchone()
     if row and row[1] != 'postatus':
+        conn.execute(sa.text("UPDATE purchase_orders SET status = lower(status)"))
         conn.execute(sa.text(
             "ALTER TABLE purchase_orders "
             "ALTER COLUMN status TYPE postatus USING status::postatus"
         ))
         conn.execute(sa.text(
             "ALTER TABLE purchase_orders "
-            "ALTER COLUMN status SET DEFAULT 'Draft'"
+            "ALTER COLUMN status SET DEFAULT 'draft'::postatus"
         ))
         print("[006] purchase_orders.status converted to POStatus enum")
     else:
