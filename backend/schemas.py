@@ -9,6 +9,43 @@ class ProfileType(str, Enum):
     vendor = "vendor"
 
 
+# ===== Company Settings Schemas =====
+class CompanySettingsBase(BaseModel):
+    name: str
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    fax: Optional[str] = None
+    gst_number: Optional[str] = None
+
+
+class CompanySettingsUpdate(BaseModel):
+    name: Optional[str] = None
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    fax: Optional[str] = None
+    gst_number: Optional[str] = None
+
+
+class CompanySettings(CompanySettingsBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+# ===== Invoice Summary (for Reports) =====
+class InvoiceSummaryItem(BaseModel):
+    invoice_id: int
+    invoice_date: datetime
+    uca_project_number: str
+    project_name: str
+    customer_name: str
+    client_po_number: Optional[str] = None
+    net_sales: float
+    discount_total: float
+    grand_total: float
+
+
 class PhoneType(str, Enum):
     work = "work"
     mobile = "mobile"

@@ -1,21 +1,87 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from typing import List
-from datetime import datetime
+from typing import List, Optional
+from datetime import datetime, date
 
 from database import get_db
 from models import (
     Quote, QuoteLineItem, Invoice, InvoiceLineItem,
-    QuoteSnapshot, QuoteLineItemSnapshot, Labor, Part, Miscellaneous
+    QuoteSnapshot, QuoteLineItemSnapshot, Labor, Part, Miscellaneous,
+    Project, Profile, DiscountCode
 )
 from schemas import (
     Invoice as InvoiceSchema,
     InvoiceCreate,
     InvoiceStatusUpdate,
-    LineItemFulfillment
+    LineItemFulfillment,
+    InvoiceSummaryItem
 )
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
+
+
+@router.get("/", response_model=List[InvoiceSummaryItem])
+def list_invoices(
+    start_date: date = Query(..., description="Start date (inclusive)"),
+    end_date: date = Query(..., description="End date (inclusive)"),
+    db: Session = Depends(get_db)
+):
+    """List invoices within a date range with project/customer info for the summary report."""
+    # Query invoices with joined quote -> project -> customer
+    invoices = (
+        db.query(Invoice)
+        .join(Quote, Invoice.quote_id == Quote.id)
+        .join(Project, Quote.project_id == Project.id)
+        .join(Profile, Project.customer_id == Profile.id)
+        .options(
+            joinedload(Invoice.line_items),
+            joinedload(Invoice.quote).joinedload(Quote.project).joinedload(Project.customer),
+        )
+        .filter(
+            Invoice.created_at >= datetime.combine(start_date, datetime.min.time()),
+            Invoice.created_at <= datetime.combine(end_date, datetime.max.time()),
+            Invoice.status != "Voided",
+        )
+        .order_by(Invoice.created_at)
+        .all()
+    )
+
+    results = []
+    for inv in invoices:
+        # Calculate net sales (sum of line totals)
+        net_sales = sum(
+            (li.unit_price or 0) * li.qty_fulfilled_this_invoice
+            for li in inv.line_items
+        )
+
+        # Discount total: we don't have the hydrated discount_code on invoice line items,
+        # so we look up discount percentages for items that have a discount_code_id
+        discount_total = 0.0
+        for li in inv.line_items:
+            if li.discount_code_id:
+                dc = db.query(DiscountCode).filter(DiscountCode.id == li.discount_code_id).first()
+                if dc:
+                    # The stored unit_price already has markup but NOT discount applied
+                    # at invoice snapshot time. However, the invoice creation flow stores
+                    # the final price (after discount) as unit_price. So discount_total
+                    # is informational — we report 0 unless we track it separately.
+                    pass
+        # For now, discount_total stays 0 since invoice unit_price is already net of discount.
+        # This can be enhanced when discount tracking is added to invoice line items.
+
+        results.append(InvoiceSummaryItem(
+            invoice_id=inv.id,
+            invoice_date=inv.created_at,
+            uca_project_number=inv.quote.project.uca_project_number,
+            project_name=inv.quote.project.name,
+            customer_name=inv.quote.project.customer.name,
+            client_po_number=inv.quote.client_po_number,
+            net_sales=net_sales,
+            discount_total=discount_total,
+            grand_total=net_sales,  # grand_total = net_sales since tax not implemented
+        ))
+
+    return results
 
 
 def get_line_item_description_for_invoice(item: QuoteLineItem, db: Session) -> str:

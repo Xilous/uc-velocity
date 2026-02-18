@@ -55,13 +55,27 @@ import type {
   StagedFulfillment, InvoiceCreate, QuoteEditorMode, StagedEdit, StagedAdd,
   StagedLineItemChange, CommitEditsRequest
 } from "@/types"
-import { Plus, Minus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info, Copy, Car, MapPin, X, Lock, GitCommit, Eye, AlertTriangle, Check, CheckCircle2 } from "lucide-react"
+import { Plus, Minus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info, Copy, Car, MapPin, X, Lock, GitCommit, Eye, AlertTriangle, Check, CheckCircle2, Printer, Loader2 } from "lucide-react"
+import { pdf } from '@react-pdf/renderer'
+import { QuotePDF } from '@/components/pdf/QuotePDF'
+import type { CompanySettings, Project } from '@/types'
 import { QuoteAuditTrail } from "./QuoteAuditTrail"
 import { PartForm } from "@/components/forms/PartForm"
 import { LaborForm } from "@/components/forms/LaborForm"
 import { MiscForm } from "@/components/forms/MiscForm"
 import { DiscountCodeForm } from "@/components/forms/DiscountCodeForm"
 import { toast } from "@/hooks/use-toast"
+import {
+  getLineItemUnitPrice as _getLineItemUnitPrice,
+  getLineItemSubtotal as _getLineItemSubtotal,
+  getLineItemTotal as _getLineItemTotal,
+  calculateNonPmsTotal as _calculateNonPmsTotal,
+  getEffectiveUnitPrice as _getEffectiveUnitPrice,
+  getEffectiveLineItemTotal as _getEffectiveLineItemTotal,
+  getFulfilledLineItemValue as _getFulfilledLineItemValue,
+  calculateSectionTotals as _calculateSectionTotals,
+  calculateQuoteTotal,
+} from "@/lib/pricing"
 
 interface QuoteEditorProps {
   quoteId: number
@@ -153,6 +167,9 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
   // Clone quote state
   const [isCloning, setIsCloning] = useState(false)
+
+  // Print PDF state
+  const [isPrinting, setIsPrinting] = useState(false)
 
   // Parking and Travel Distance dialog states
   const [travelDistanceDialogOpen, setTravelDistanceDialogOpen] = useState(false)
@@ -953,78 +970,25 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     return "Misc Description"
   }
 
-  const getLineItemUnitPrice = (item: QuoteLineItem): number => {
-    if (item.unit_price) return item.unit_price
-    if (item.labor) {
-      return item.labor.hours * item.labor.rate * (1 + item.labor.markup_percent / 100)
-    }
-    if (item.part) {
-      return item.part.cost * (1 + (item.part.markup_percent ?? 0) / 100)
-    }
-    if (item.miscellaneous) {
-      return item.miscellaneous.unit_price * (1 + item.miscellaneous.markup_percent / 100)
-    }
-    return 0
-  }
+  // Pricing functions — delegate to shared @/lib/pricing module
+  const getLineItemUnitPrice = (item: QuoteLineItem): number => _getLineItemUnitPrice(item)
+  const getLineItemSubtotal = (item: QuoteLineItem): number => _getLineItemSubtotal(item)
+  const getLineItemTotal = (item: QuoteLineItem): number => _getLineItemTotal(item)
 
-  const getLineItemSubtotal = (item: QuoteLineItem): number => {
-    return getLineItemUnitPrice(item) * item.quantity
-  }
-
-  const getLineItemTotal = (item: QuoteLineItem): number => {
-    const subtotal = getLineItemSubtotal(item)
-    if (item.discount_code) {
-      return subtotal * (1 - item.discount_code.discount_percent / 100)
-    }
-    return subtotal
-  }
-
-  // Calculate total of non-PMS items (the base for PMS % calculations)
   const calculateNonPmsTotal = (): number => {
     if (!quote) return 0
-    return quote.line_items
-      .filter(item => !item.is_pms)
-      .reduce((sum, item) => sum + getLineItemTotal(item), 0)
+    return _calculateNonPmsTotal(quote.line_items)
   }
 
-  // Get the effective unit price for a line item (handles PMS % dynamic calculation)
-  const getEffectiveUnitPrice = (item: QuoteLineItem): number => {
-    if (item.is_pms && item.pms_percent != null) {
-      // PMS % item: calculate dynamically based on non-PMS total
-      return calculateNonPmsTotal() * item.pms_percent / 100
-    }
-    return getLineItemUnitPrice(item)
-  }
+  const getEffectiveUnitPrice = (item: QuoteLineItem): number =>
+    _getEffectiveUnitPrice(item, calculateNonPmsTotal())
 
-  // Get effective total for a line item (uses effective unit price for PMS % items)
-  const getEffectiveLineItemTotal = (item: QuoteLineItem): number => {
-    const unitPrice = getEffectiveUnitPrice(item)
-    const subtotal = unitPrice * item.quantity
-    if (item.discount_code) {
-      return subtotal * (1 - item.discount_code.discount_percent / 100)
-    }
-    return subtotal
-  }
+  const getEffectiveLineItemTotal = (item: QuoteLineItem): number =>
+    _getEffectiveLineItemTotal(item, calculateNonPmsTotal())
 
   const calculateTotal = (): number => {
     if (!quote) return 0
-    const nonPmsTotal = calculateNonPmsTotal()
-    const pmsTotal = quote.line_items
-      .filter(item => item.is_pms)
-      .reduce((sum, item) => {
-        if (item.pms_percent != null) {
-          // PMS % item: calculate from non-PMS total
-          const unitPrice = nonPmsTotal * item.pms_percent / 100
-          let subtotal = unitPrice * item.quantity
-          if (item.discount_code) {
-            subtotal = subtotal * (1 - item.discount_code.discount_percent / 100)
-          }
-          return sum + subtotal
-        }
-        // PMS $ item: use the stored unit_price
-        return sum + getLineItemTotal(item)
-      }, 0)
-    return nonPmsTotal + pmsTotal
+    return calculateQuoteTotal(quote.line_items)
   }
 
   // Calculate weighted average markup percentage
@@ -1264,15 +1228,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   }
 
   // Calculate section totals for display
-  const calculateSectionTotals = (items: QuoteLineItem[], useEffectiveTotal = false) => {
-    return {
-      qtyOrdered: items.reduce((sum, item) => sum + item.quantity, 0),
-      qtyPending: items.reduce((sum, item) => sum + item.qty_pending, 0),
-      qtyFulfilled: items.reduce((sum, item) => sum + item.qty_fulfilled, 0),
-      total: items.reduce((sum, item) => sum + (useEffectiveTotal ? getEffectiveLineItemTotal(item) : getLineItemTotal(item)), 0),
-      fulfilledValue: items.reduce((sum, item) => sum + getFulfilledLineItemValue(item), 0),
-    }
-  }
+  const calculateSectionTotals = (items: QuoteLineItem[], useEffectiveTotal = false) =>
+    _calculateSectionTotals(items, calculateNonPmsTotal(), useEffectiveTotal)
 
   // Calculate staged total for a single line item
   const getStagedLineItemTotal = (item: QuoteLineItem): number => {
@@ -1286,16 +1243,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     return total
   }
 
-  // Calculate fulfilled value for a single line item
-  const getFulfilledLineItemValue = (item: QuoteLineItem): number => {
-    if (item.qty_fulfilled === 0) return 0
-    const unitPrice = getEffectiveUnitPrice(item)
-    let total = unitPrice * item.qty_fulfilled
-    if (item.discount_code) {
-      total = total * (1 - item.discount_code.discount_percent / 100)
-    }
-    return total
-  }
+  const getFulfilledLineItemValue = (item: QuoteLineItem): number =>
+    _getFulfilledLineItemValue(item, calculateNonPmsTotal())
 
   // Calculate staged totals for a section
   const calculateStagedSectionTotals = (items: QuoteLineItem[]) => {
@@ -1943,6 +1892,26 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     }
   }
 
+  const handlePrintQuote = async () => {
+    if (!quote) return
+    setIsPrinting(true)
+    try {
+      const [project, companySettings] = await Promise.all([
+        api.projects.get(quote.project_id) as Promise<Project>,
+        api.companySettings.get(),
+      ])
+      const blob = await pdf(
+        <QuotePDF quote={quote} project={project} companySettings={companySettings} />
+      ).toBlob()
+      const url = URL.createObjectURL(blob)
+      window.open(url, '_blank')
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to generate PDF")
+    } finally {
+      setIsPrinting(false)
+    }
+  }
+
   if (loading) {
     return <div className="p-8 text-center text-muted-foreground">Loading...</div>
   }
@@ -2574,6 +2543,16 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handlePrintQuote}
+            disabled={isPrinting}
+            className="gap-2"
+          >
+            {isPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+            {isPrinting ? "Generating..." : "Print Quote"}
+          </Button>
           <Button
             variant="outline"
             size="sm"

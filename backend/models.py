@@ -389,6 +389,17 @@ class QuoteSnapshot(Base):
     line_item_states = relationship("QuoteLineItemSnapshot", back_populates="snapshot", cascade="all, delete-orphan")
 
 
+class CompanySettings(Base):
+    __tablename__ = "company_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    address = Column(String)
+    phone = Column(String)
+    fax = Column(String)
+    gst_number = Column(String)
+
+
 class QuoteLineItemSnapshot(Base):
     __tablename__ = "quote_line_item_snapshots"
 

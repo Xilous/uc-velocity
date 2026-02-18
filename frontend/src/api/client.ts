@@ -12,7 +12,8 @@ import type {
   POCommitEditsRequest, POCommitEditsResponse,
   Invoice, InvoiceCreate, InvoiceStatusUpdate, QuoteSnapshot, RevertPreview,
   MarkupControlToggleRequest, MarkupControlToggleResponse,
-  CommitEditsRequest, CommitEditsResponse
+  CommitEditsRequest, CommitEditsResponse,
+  CompanySettings, CompanySettingsUpdate, InvoiceSummaryItem
 } from '@/types';
 
 // API base URL - configurable via environment variable for production
@@ -191,6 +192,15 @@ export const api = {
     get: (id: number) => request<Invoice>(`/invoices/${id}`),
     updateStatus: (id: number, data: InvoiceStatusUpdate) =>
       request<Invoice>(`/invoices/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    getSummary: (startDate: string, endDate: string) =>
+      request<InvoiceSummaryItem[]>(`/invoices/?start_date=${startDate}&end_date=${endDate}`),
+  },
+
+  // ===== Company Settings =====
+  companySettings: {
+    get: () => request<CompanySettings>('/company-settings/'),
+    update: (data: CompanySettingsUpdate) =>
+      request<CompanySettings>('/company-settings/', { method: 'PUT', body: JSON.stringify(data) }),
   },
 
   // ===== Purchase Orders =====

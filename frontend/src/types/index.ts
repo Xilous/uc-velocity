@@ -1,5 +1,36 @@
 // TypeScript interfaces matching backend schemas
 
+// ===== Company Settings =====
+export interface CompanySettings {
+  id: number;
+  name: string;
+  address?: string;
+  phone?: string;
+  fax?: string;
+  gst_number?: string;
+}
+
+export interface CompanySettingsUpdate {
+  name?: string;
+  address?: string;
+  phone?: string;
+  fax?: string;
+  gst_number?: string;
+}
+
+// ===== Invoice Summary (for Reports) =====
+export interface InvoiceSummaryItem {
+  invoice_id: number;
+  invoice_date: string;
+  uca_project_number: string;
+  project_name: string;
+  customer_name: string;
+  client_po_number?: string;
+  net_sales: number;
+  discount_total: number;
+  grand_total: number;
+}
+
 // ===== Labor =====
 export interface Labor {
   id: number;

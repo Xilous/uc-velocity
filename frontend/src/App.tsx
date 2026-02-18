@@ -18,6 +18,7 @@ import { ProfilesPage } from "@/pages/ProfilesPage"
 import { ProjectsPage } from "@/pages/ProjectsPage"
 import { ProjectDetailsPage } from "@/pages/ProjectDetailsPage"
 import { DiscountCodesPage } from "@/pages/DiscountCodesPage"
+import { ReportsPage } from "@/pages/ReportsPage"
 import { api } from "@/api/client"
 import type { Part, Labor, Miscellaneous } from "@/types"
 import {
@@ -33,11 +34,12 @@ import {
   FileText,
   Lock,
   Search,
+  BarChart3,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Toaster } from "@/components/ui/toaster"
 
-type AppView = "profiles" | "projects" | "project-details" | "inventory" | "discount-codes"
+type AppView = "profiles" | "projects" | "project-details" | "inventory" | "discount-codes" | "reports"
 
 function App() {
   const [currentView, setCurrentView] = useState<AppView>("projects")
@@ -188,6 +190,9 @@ function App() {
 
       case "discount-codes":
         return <DiscountCodesPage />
+
+      case "reports":
+        return <ReportsPage />
 
       case "project-details":
         if (selectedProjectId === null) {
@@ -593,6 +598,14 @@ function App() {
             >
               <Tag className="h-4 w-4" />
               Discount Codes
+            </Button>
+            <Button
+              variant={currentView === "reports" ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              onClick={() => setCurrentView("reports")}
+            >
+              <BarChart3 className="h-4 w-4" />
+              Reports
             </Button>
           </nav>
         </ScrollArea>

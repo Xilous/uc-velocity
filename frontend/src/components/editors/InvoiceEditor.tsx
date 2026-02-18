@@ -16,9 +16,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Button } from "@/components/ui/button"
 import { api } from "@/api/client"
-import type { Invoice } from "@/types"
-import { Receipt, Package, Wrench, FileText, AlertTriangle } from "lucide-react"
+import type { Invoice, Project, CompanySettings } from "@/types"
+import { Receipt, Package, Wrench, FileText, AlertTriangle, Printer, Loader2 } from "lucide-react"
+import { pdf } from '@react-pdf/renderer'
+import { InvoicePDF } from '@/components/pdf/InvoicePDF'
 
 interface InvoiceEditorProps {
   invoiceId: number
@@ -29,6 +32,7 @@ export function InvoiceEditor({ invoiceId, onUpdate }: InvoiceEditorProps) {
   const [invoice, setInvoice] = useState<Invoice | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isPrinting, setIsPrinting] = useState(false)
 
   const fetchInvoice = async () => {
     setLoading(true)
@@ -93,6 +97,27 @@ export function InvoiceEditor({ invoiceId, onUpdate }: InvoiceEditorProps) {
     }, 0)
   }
 
+  const handlePrintInvoice = async () => {
+    if (!invoice) return
+    setIsPrinting(true)
+    try {
+      const [quote, companySettings] = await Promise.all([
+        api.quotes.get(invoice.quote_id),
+        api.companySettings.get(),
+      ])
+      const project = await api.projects.get(quote.project_id) as unknown as Project
+      const blob = await pdf(
+        <InvoicePDF invoice={invoice} quote={quote} project={project} companySettings={companySettings} />
+      ).toBlob()
+      const url = URL.createObjectURL(blob)
+      window.open(url, '_blank')
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to generate PDF")
+    } finally {
+      setIsPrinting(false)
+    }
+  }
+
   if (loading) {
     return <div className="p-8 text-center text-muted-foreground">Loading...</div>
   }
@@ -131,20 +156,32 @@ export function InvoiceEditor({ invoiceId, onUpdate }: InvoiceEditorProps) {
           )}
         </div>
 
-        {!isVoided && (
-          <Select
-            value={invoice.status}
-            onValueChange={(v) => handleStatusChange(v as "Sent" | "Paid")}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handlePrintInvoice}
+            disabled={isPrinting}
+            className="gap-2"
           >
-            <SelectTrigger className="w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="Sent">Sent</SelectItem>
-              <SelectItem value="Paid">Paid</SelectItem>
-            </SelectContent>
-          </Select>
-        )}
+            {isPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+            {isPrinting ? "Generating..." : "Print Invoice"}
+          </Button>
+          {!isVoided && (
+            <Select
+              value={invoice.status}
+              onValueChange={(v) => handleStatusChange(v as "Sent" | "Paid")}
+            >
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Sent">Sent</SelectItem>
+                <SelectItem value="Paid">Paid</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        </div>
       </div>
 
       {/* Voided Warning */}

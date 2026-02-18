@@ -1,9 +1,9 @@
 """
-Database seeding for system items.
+Database seeding for system items and company settings.
 Run this at application startup to ensure system items exist.
 """
 from sqlalchemy.orm import Session
-from models import Miscellaneous
+from models import Miscellaneous, CompanySettings
 
 SYSTEM_MISC_ITEMS = [
     # Parking
@@ -59,9 +59,18 @@ SYSTEM_MISC_ITEMS = [
 ]
 
 
+DEFAULT_COMPANY_SETTINGS = {
+    "name": "Upper Canada Specialty Hardware",
+    "address": "7100 Warden Ave, Unit #1, Markham, Ontario, L3R 8B5",
+    "phone": "(905) 948-8350",
+    "fax": "(905) 948-8392",
+    "gst_number": "",
+}
+
+
 def seed_system_items(db: Session) -> None:
     """
-    Seed system miscellaneous items if they don't exist.
+    Seed system miscellaneous items and company settings if they don't exist.
     Called at application startup.
     """
     for item_data in SYSTEM_MISC_ITEMS:
@@ -74,5 +83,10 @@ def seed_system_items(db: Session) -> None:
         if not existing:
             db_item = Miscellaneous(**item_data)
             db.add(db_item)
+
+    # Seed company settings (singleton)
+    existing_settings = db.query(CompanySettings).first()
+    if not existing_settings:
+        db.add(CompanySettings(**DEFAULT_COMPANY_SETTINGS))
 
     db.commit()
