@@ -398,6 +398,7 @@ class CompanySettings(Base):
     phone = Column(String)
     fax = Column(String)
     gst_number = Column(String)
+    hst_rate = Column(Float, default=13.0)
 
 
 class QuoteLineItemSnapshot(Base):

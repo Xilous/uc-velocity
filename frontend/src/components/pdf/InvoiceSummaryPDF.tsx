@@ -12,13 +12,14 @@ interface InvoiceSummaryPDFProps {
 
 // Column widths for the summary table
 const col = {
-  invoiceNum: { width: '10%' } as const,
-  invoiceDate: { width: '11%' } as const,
-  ucaProject: { width: '10%' } as const,
-  poNumber: { width: '10%' } as const,
-  customerProject: { width: '27%' } as const,
-  discount: { width: '10%', textAlign: 'right' as const },
-  netSales: { width: '11%', textAlign: 'right' as const },
+  invoiceNum: { width: '8%' } as const,
+  invoiceDate: { width: '10%' } as const,
+  ucaProject: { width: '9%' } as const,
+  poNumber: { width: '9%' } as const,
+  customerProject: { width: '24%' } as const,
+  discount: { width: '9%', textAlign: 'right' as const },
+  netSales: { width: '10%', textAlign: 'right' as const },
+  hst: { width: '10%', textAlign: 'right' as const },
   total: { width: '11%', textAlign: 'right' as const },
 }
 
@@ -27,9 +28,10 @@ export function InvoiceSummaryPDF({ invoices, dateRange, companySettings }: Invo
     (acc, inv) => ({
       discount: acc.discount + inv.discount_total,
       netSales: acc.netSales + inv.net_sales,
+      hst: acc.hst + inv.hst_amount,
       total: acc.total + inv.grand_total,
     }),
-    { discount: 0, netSales: 0, total: 0 }
+    { discount: 0, netSales: 0, hst: 0, total: 0 }
   )
 
   const formatDate = (dateStr: string) =>
@@ -59,6 +61,7 @@ export function InvoiceSummaryPDF({ invoices, dateRange, companySettings }: Invo
           <Text style={[styles.colHeaderText, col.customerProject]}>Customer / Project Name</Text>
           <Text style={[styles.colHeaderText, col.discount]}>Discount</Text>
           <Text style={[styles.colHeaderText, col.netSales]}>Net Sales</Text>
+          <Text style={[styles.colHeaderText, col.hst]}>HST</Text>
           <Text style={[styles.colHeaderText, col.total]}>Total</Text>
         </View>
 
@@ -78,6 +81,7 @@ export function InvoiceSummaryPDF({ invoices, dateRange, companySettings }: Invo
             </Text>
             <Text style={col.discount}>{formatCurrency(inv.discount_total)}</Text>
             <Text style={col.netSales}>{formatCurrency(inv.net_sales)}</Text>
+            <Text style={col.hst}>{formatCurrency(inv.hst_amount)}</Text>
             <Text style={col.total}>{formatCurrency(inv.grand_total)}</Text>
           </View>
         ))}
@@ -91,6 +95,7 @@ export function InvoiceSummaryPDF({ invoices, dateRange, companySettings }: Invo
           <Text style={col.customerProject} />
           <Text style={[col.discount, styles.bold]}>{formatCurrency(totals.discount)}</Text>
           <Text style={[col.netSales, styles.bold]}>{formatCurrency(totals.netSales)}</Text>
+          <Text style={[col.hst, styles.bold]}>{formatCurrency(totals.hst)}</Text>
           <Text style={[col.total, styles.bold]}>{formatCurrency(totals.total)}</Text>
         </View>
 

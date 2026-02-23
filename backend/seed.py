@@ -65,6 +65,7 @@ DEFAULT_COMPANY_SETTINGS = {
     "phone": "(905) 948-8350",
     "fax": "(905) 948-8392",
     "gst_number": "",
+    "hst_rate": 13.0,
 }
 
 

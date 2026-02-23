@@ -16,6 +16,7 @@ class CompanySettingsBase(BaseModel):
     phone: Optional[str] = None
     fax: Optional[str] = None
     gst_number: Optional[str] = None
+    hst_rate: float = 13.0
 
 
 class CompanySettingsUpdate(BaseModel):
@@ -24,6 +25,7 @@ class CompanySettingsUpdate(BaseModel):
     phone: Optional[str] = None
     fax: Optional[str] = None
     gst_number: Optional[str] = None
+    hst_rate: Optional[float] = None
 
 
 class CompanySettings(CompanySettingsBase):
@@ -43,6 +45,7 @@ class InvoiceSummaryItem(BaseModel):
     client_po_number: Optional[str] = None
     net_sales: float
     discount_total: float
+    hst_amount: float
     grand_total: float
 
 

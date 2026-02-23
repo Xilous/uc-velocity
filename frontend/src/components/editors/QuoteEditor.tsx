@@ -171,6 +171,9 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   // Print PDF state
   const [isPrinting, setIsPrinting] = useState(false)
 
+  // Company settings (for HST rate display)
+  const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null)
+
   // Parking and Travel Distance dialog states
   const [travelDistanceDialogOpen, setTravelDistanceDialogOpen] = useState(false)
   const [travelDistanceItems, setTravelDistanceItems] = useState<Miscellaneous[]>([])
@@ -259,6 +262,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   useEffect(() => {
     fetchQuote()
     fetchResources()
+    api.companySettings.get().then(setCompanySettings).catch(() => {})
   }, [quoteId])
 
   // Computed: Are there staged invoicing changes?
@@ -2873,17 +2877,54 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
             <Separator />
 
-            {/* Quote Total (existing) */}
+            {/* Quote Subtotal */}
             <div className="flex justify-between items-center">
-              <span className="text-lg font-semibold">Quote Total:</span>
+              <span className="text-sm font-medium text-muted-foreground">Subtotal:</span>
               {hasStagedChanges ? (
-                <span className="text-2xl font-bold">
+                <span className="text-lg font-semibold">
                   ${calculateTotal().toFixed(2)}
-                  <span className="text-muted-foreground mx-1 text-lg">→</span>
+                  <span className="text-muted-foreground mx-1">→</span>
                   <span className="text-blue-600 dark:text-blue-400">${calculateProjectedTotal().toFixed(2)}</span>
                 </span>
               ) : (
-                <span className="text-2xl font-bold">${calculateTotal().toFixed(2)}</span>
+                <span className="text-lg font-semibold">${calculateTotal().toFixed(2)}</span>
+              )}
+            </div>
+
+            {/* HST */}
+            {companySettings && companySettings.hst_rate > 0 && (
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-muted-foreground">HST ({companySettings.hst_rate}%):</span>
+                {hasStagedChanges ? (
+                  <span className="text-lg font-semibold">
+                    ${(calculateTotal() * companySettings.hst_rate / 100).toFixed(2)}
+                    <span className="text-muted-foreground mx-1">→</span>
+                    <span className="text-blue-600 dark:text-blue-400">${(calculateProjectedTotal() * companySettings.hst_rate / 100).toFixed(2)}</span>
+                  </span>
+                ) : (
+                  <span className="text-lg font-semibold">${(calculateTotal() * companySettings.hst_rate / 100).toFixed(2)}</span>
+                )}
+              </div>
+            )}
+
+            {/* Quote Total (with HST) */}
+            <div className="flex justify-between items-center">
+              <span className="text-lg font-semibold">Total:</span>
+              {hasStagedChanges ? (() => {
+                const hstRate = companySettings?.hst_rate ?? 0
+                const currentTotal = calculateTotal() * (1 + hstRate / 100)
+                const projectedTotal = calculateProjectedTotal() * (1 + hstRate / 100)
+                return (
+                  <span className="text-2xl font-bold">
+                    ${currentTotal.toFixed(2)}
+                    <span className="text-muted-foreground mx-1 text-lg">→</span>
+                    <span className="text-blue-600 dark:text-blue-400">${projectedTotal.toFixed(2)}</span>
+                  </span>
+                )
+              })() : (
+                <span className="text-2xl font-bold">
+                  ${(calculateTotal() * (1 + (companySettings?.hst_rate ?? 0) / 100)).toFixed(2)}
+                </span>
               )}
             </div>
           </div>

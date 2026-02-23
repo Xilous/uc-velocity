@@ -173,6 +173,7 @@ export function ReportsPage() {
                         <th className="px-3 py-2 text-left font-medium text-muted-foreground">P/O Number</th>
                         <th className="px-3 py-2 text-left font-medium text-muted-foreground">Customer / Project</th>
                         <th className="px-3 py-2 text-right font-medium text-muted-foreground">Net Sales</th>
+                        <th className="px-3 py-2 text-right font-medium text-muted-foreground">HST</th>
                         <th className="px-3 py-2 text-right font-medium text-muted-foreground">Total</th>
                       </tr>
                     </thead>
@@ -185,6 +186,7 @@ export function ReportsPage() {
                           <td className="px-3 py-2">{inv.client_po_number || '—'}</td>
                           <td className="px-3 py-2">{inv.customer_name} — {inv.project_name}</td>
                           <td className="px-3 py-2 text-right">${inv.net_sales.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">${inv.hst_amount.toFixed(2)}</td>
                           <td className="px-3 py-2 text-right font-medium">${inv.grand_total.toFixed(2)}</td>
                         </tr>
                       ))}
@@ -194,6 +196,9 @@ export function ReportsPage() {
                         <td colSpan={5} className="px-3 py-2">Totals</td>
                         <td className="px-3 py-2 text-right">
                           ${invoices.reduce((s, i) => s + i.net_sales, 0).toFixed(2)}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          ${invoices.reduce((s, i) => s + i.hst_amount, 0).toFixed(2)}
                         </td>
                         <td className="px-3 py-2 text-right">
                           ${invoices.reduce((s, i) => s + i.grand_total, 0).toFixed(2)}

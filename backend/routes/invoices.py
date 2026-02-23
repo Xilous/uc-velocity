@@ -7,7 +7,7 @@ from database import get_db
 from models import (
     Quote, QuoteLineItem, Invoice, InvoiceLineItem,
     QuoteSnapshot, QuoteLineItemSnapshot, Labor, Part, Miscellaneous,
-    Project, Profile, DiscountCode
+    Project, Profile, DiscountCode, CompanySettings
 )
 from schemas import (
     Invoice as InvoiceSchema,
@@ -27,6 +27,10 @@ def list_invoices(
     db: Session = Depends(get_db)
 ):
     """List invoices within a date range with project/customer info for the summary report."""
+    # Fetch HST rate from company settings
+    settings = db.query(CompanySettings).first()
+    hst_rate = settings.hst_rate if settings and settings.hst_rate is not None else 13.0
+
     # Query invoices with joined quote -> project -> customer
     invoices = (
         db.query(Invoice)
@@ -69,6 +73,8 @@ def list_invoices(
         # For now, discount_total stays 0 since invoice unit_price is already net of discount.
         # This can be enhanced when discount tracking is added to invoice line items.
 
+        hst_amount = net_sales * (hst_rate / 100)
+
         results.append(InvoiceSummaryItem(
             invoice_id=inv.id,
             invoice_date=inv.created_at,
@@ -78,7 +84,8 @@ def list_invoices(
             client_po_number=inv.quote.client_po_number,
             net_sales=net_sales,
             discount_total=discount_total,
-            grand_total=net_sales,  # grand_total = net_sales since tax not implemented
+            hst_amount=hst_amount,
+            grand_total=net_sales + hst_amount,
         ))
 
     return results

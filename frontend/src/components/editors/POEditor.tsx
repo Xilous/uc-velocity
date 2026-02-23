@@ -51,7 +51,8 @@ import { api } from "@/api/client"
 import type {
   PurchaseOrder, POLineItem, POLineItemCreate, POLineItemType, POStatus, Part,
   POEditorMode, StagedPOEdit, StagedPOAdd,
-  StagedPOLineItemChange, POCommitEditsRequest, POReceivingCreate, POReceivingLineItemCreate
+  StagedPOLineItemChange, POCommitEditsRequest, POReceivingCreate, POReceivingLineItemCreate,
+  CompanySettings
 } from "@/types"
 import {
   Plus, Minus, Trash2, Package, FileText, Building, Pencil, Copy,
@@ -123,6 +124,9 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
   const [isEditingDeliveryDate, setIsEditingDeliveryDate] = useState(false)
   const [savingDeliveryDate, setSavingDeliveryDate] = useState(false)
 
+  // ===== Company Settings (for HST rate) =====
+  const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null)
+
   // ===== Clone State =====
   const [isCloning, setIsCloning] = useState(false)
   const [cloneConfirmOpen, setCloneConfirmOpen] = useState(false)
@@ -184,6 +188,7 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
   useEffect(() => {
     fetchPO()
     fetchParts()
+    api.companySettings.get().then(setCompanySettings).catch(() => {})
   }, [poId])
 
   // ===== Navigation Guard =====
@@ -1395,9 +1400,17 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
             {!po.line_items.some(item => item.qty_received > 0) && (
               <>
                 <Separator />
+                {companySettings && companySettings.hst_rate > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">HST ({companySettings.hst_rate}%):</span>
+                    <span className="font-medium">{formatCurrency(calculateTotalOrdered() * companySettings.hst_rate / 100)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center">
                   <span className="font-semibold text-lg">Total:</span>
-                  <span className="text-2xl font-bold">{formatCurrency(calculateTotalOrdered())}</span>
+                  <span className="text-2xl font-bold">
+                    {formatCurrency(calculateTotalOrdered() * (1 + (companySettings?.hst_rate ?? 0) / 100))}
+                  </span>
                 </div>
               </>
             )}

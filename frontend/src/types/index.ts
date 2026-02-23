@@ -8,6 +8,7 @@ export interface CompanySettings {
   phone?: string;
   fax?: string;
   gst_number?: string;
+  hst_rate: number;
 }
 
 export interface CompanySettingsUpdate {
@@ -16,6 +17,7 @@ export interface CompanySettingsUpdate {
   phone?: string;
   fax?: string;
   gst_number?: string;
+  hst_rate?: number;
 }
 
 // ===== Invoice Summary (for Reports) =====
@@ -28,6 +30,7 @@ export interface InvoiceSummaryItem {
   client_po_number?: string;
   net_sales: number;
   discount_total: number;
+  hst_amount: number;
   grand_total: number;
 }
 

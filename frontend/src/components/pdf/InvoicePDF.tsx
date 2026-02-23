@@ -88,10 +88,13 @@ export function InvoicePDF({ invoice, quote, project, companySettings }: Invoice
   const partItems = invoice.line_items.filter(i => i.item_type === 'part')
   const miscItems = invoice.line_items.filter(i => i.item_type === 'misc')
 
-  const grandTotal = invoice.line_items.reduce(
+  const subtotal = invoice.line_items.reduce(
     (sum, item) => sum + (item.unit_price || 0) * item.qty_fulfilled_this_invoice,
     0
   )
+  const hstRate = companySettings.hst_rate ?? 13.0
+  const hstAmount = subtotal * (hstRate / 100)
+  const grandTotal = subtotal + hstAmount
 
   const invoiceDate = new Date(invoice.created_at).toLocaleDateString('en-CA', {
     day: '2-digit',
@@ -165,8 +168,14 @@ export function InvoicePDF({ invoice, quote, project, companySettings }: Invoice
         <View style={styles.totalsBlock}>
           <View style={styles.totalsRow}>
             <Text style={[styles.totalsLabel, styles.bold]}>SUBTOTAL:</Text>
-            <Text style={styles.totalsValue}>{formatCurrency(grandTotal)}</Text>
+            <Text style={styles.totalsValue}>{formatCurrency(subtotal)}</Text>
           </View>
+          {hstRate > 0 && (
+            <View style={styles.totalsRow}>
+              <Text style={styles.totalsLabel}>HST ({hstRate}%):</Text>
+              <Text style={styles.totalsValue}>{formatCurrency(hstAmount)}</Text>
+            </View>
+          )}
           <View style={styles.grandTotalRow}>
             <Text style={[styles.totalsLabel, styles.bold]}>TOTAL:</Text>
             <Text style={[styles.totalsValue, styles.bold]}>{formatCurrency(grandTotal)}</Text>

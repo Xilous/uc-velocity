@@ -103,9 +103,12 @@ export function QuotePDF({ quote, project, companySettings }: QuotePDFProps) {
   const miscItems = quote.line_items.filter(i => i.item_type === 'misc')
 
   const nonPmsTotal = calculateNonPmsTotal(quote.line_items)
-  const grandTotal = calculateQuoteTotal(quote.line_items)
+  const subtotalAfterDiscount = calculateQuoteTotal(quote.line_items)
   const totalDiscount = calculateTotalDiscount(quote.line_items, nonPmsTotal)
-  const subtotalBeforeDiscount = grandTotal + totalDiscount
+  const subtotalBeforeDiscount = subtotalAfterDiscount + totalDiscount
+  const hstRate = companySettings.hst_rate ?? 13.0
+  const hstAmount = subtotalAfterDiscount * (hstRate / 100)
+  const grandTotal = subtotalAfterDiscount + hstAmount
 
   const formattedDate = new Date(quote.created_at).toLocaleDateString('en-CA', {
     day: '2-digit',
@@ -183,6 +186,12 @@ export function QuotePDF({ quote, project, companySettings }: QuotePDFProps) {
             <View style={styles.totalsRow}>
               <Text style={styles.totalsLabel}>Discount:</Text>
               <Text style={styles.totalsValue}>-{formatCurrency(totalDiscount)}</Text>
+            </View>
+          )}
+          {hstRate > 0 && (
+            <View style={styles.totalsRow}>
+              <Text style={styles.totalsLabel}>HST ({hstRate}%):</Text>
+              <Text style={styles.totalsValue}>{formatCurrency(hstAmount)}</Text>
             </View>
           )}
           <View style={styles.grandTotalRow}>
