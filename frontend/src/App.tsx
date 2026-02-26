@@ -218,8 +218,7 @@ function App() {
           if (!term) return true
           return (
             part.part_number.toLowerCase().includes(term) ||
-            part.description.toLowerCase().includes(term) ||
-            (part.category?.toLowerCase().includes(term) ?? false)
+            part.description.toLowerCase().includes(term)
           )
         })
 
@@ -227,8 +226,7 @@ function App() {
           const term = inventorySearchTerm.toLowerCase()
           if (!term) return true
           return (
-            labor.description.toLowerCase().includes(term) ||
-            (labor.category?.toLowerCase().includes(term) ?? false)
+            labor.description.toLowerCase().includes(term)
           )
         })
 

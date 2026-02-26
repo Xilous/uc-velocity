@@ -35,11 +35,18 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Create all baseline tables."""
 
-    # ── Enum types ──
-    profiletype = sa.Enum('customer', 'vendor', name='profiletype', create_type=True)
-    phonetype = sa.Enum('work', 'mobile', name='phonetype', create_type=True)
-    profiletype.create(op.get_bind(), checkfirst=True)
-    phonetype.create(op.get_bind(), checkfirst=True)
+    # ── Enum types (created separately, then referenced with create_type=False) ──
+    conn = op.get_bind()
+    conn.execute(sa.text(
+        "DO $$ BEGIN CREATE TYPE profiletype AS ENUM ('customer', 'vendor'); "
+        "EXCEPTION WHEN duplicate_object THEN NULL; END $$"
+    ))
+    conn.execute(sa.text(
+        "DO $$ BEGIN CREATE TYPE phonetype AS ENUM ('work', 'mobile'); "
+        "EXCEPTION WHEN duplicate_object THEN NULL; END $$"
+    ))
+    profiletype = sa.Enum('customer', 'vendor', name='profiletype', create_type=False)
+    phonetype = sa.Enum('work', 'mobile', name='phonetype', create_type=False)
 
     # ── categories ──
     op.create_table(
