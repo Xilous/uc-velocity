@@ -34,6 +34,32 @@ export interface InvoiceSummaryItem {
   grand_total: number;
 }
 
+// ===== Backlog Quotes Report =====
+export interface BacklogLineItem {
+  line_item_id: number;
+  item_type: string;
+  description: string;
+  quantity: number;
+  qty_fulfilled: number;
+  qty_pending: number;
+  unit_price: number;
+  discount_percent: number;
+  backlog_value: number;
+}
+
+export interface BacklogQuoteItem {
+  quote_id: number;
+  quote_number: string;
+  uca_project_number: string;
+  customer_name: string;
+  project_name: string;
+  client_po_number?: string;
+  status: string;
+  quote_total: number;
+  backlog_total: number;
+  line_items: BacklogLineItem[];
+}
+
 // ===== Labor =====
 export interface Labor {
   id: number;
