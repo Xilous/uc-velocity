@@ -60,6 +60,29 @@ export interface BacklogQuoteItem {
   line_items: BacklogLineItem[];
 }
 
+// ===== Cost Codes =====
+export interface CostCode {
+  id: number;
+  code: string;
+  description: string;
+  gp_cost_code_properties?: string | null;
+  uch_dept_properties?: string | null;
+}
+
+export interface CostCodeCreate {
+  code: string;
+  description: string;
+  gp_cost_code_properties?: string | null;
+  uch_dept_properties?: string | null;
+}
+
+export interface CostCodeUpdate {
+  code?: string;
+  description?: string;
+  gp_cost_code_properties?: string | null;
+  uch_dept_properties?: string | null;
+}
+
 // ===== Labor =====
 export interface Labor {
   id: number;
@@ -297,6 +320,8 @@ export interface Quote {
   work_description?: string | null;
   markup_control_enabled: boolean;  // Markup Discount Control toggle
   global_markup_percent?: number | null;  // Global markup % when control is enabled
+  cost_code_id?: number | null;
+  cost_code?: CostCode | null;
   line_items: QuoteLineItem[];
 }
 
@@ -304,11 +329,13 @@ export interface QuoteCreate {
   project_id: number;
   client_po_number?: string;
   work_description?: string;
+  cost_code_id?: number;
 }
 
 export interface QuoteUpdate {
   client_po_number?: string | null;
   work_description?: string | null;
+  cost_code_id?: number | null;
 }
 
 // ===== PO Line Items =====
@@ -349,6 +376,8 @@ export interface PurchaseOrder {
   work_description?: string | null;
   vendor_po_number?: string | null;
   expected_delivery_date?: string | null;
+  cost_code_id?: number | null;
+  cost_code?: CostCode | null;
   vendor: Profile;
   line_items: POLineItem[];
 }
@@ -360,6 +389,7 @@ export interface PurchaseOrderCreate {
   work_description?: string;
   vendor_po_number?: string;
   expected_delivery_date?: string;
+  cost_code_id?: number;
 }
 
 export interface PurchaseOrderUpdate {
@@ -367,6 +397,7 @@ export interface PurchaseOrderUpdate {
   work_description?: string | null;
   vendor_po_number?: string | null;
   expected_delivery_date?: string | null;
+  cost_code_id?: number | null;
 }
 
 // ===== PO Receiving =====

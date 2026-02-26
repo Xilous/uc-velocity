@@ -49,14 +49,14 @@ import {
 import type { SearchableSelectOption } from "@/components/ui/searchable-select"
 import { api } from "@/api/client"
 import type {
-  PurchaseOrder, POLineItem, POLineItemCreate, POLineItemType, POStatus, Part,
+  PurchaseOrder, POLineItem, POLineItemCreate, POLineItemType, POStatus, Part, CostCode,
   POEditorMode, StagedPOEdit, StagedPOAdd,
   StagedPOLineItemChange, POCommitEditsRequest, POReceivingCreate, POReceivingLineItemCreate,
   CompanySettings
 } from "@/types"
 import {
   Plus, Minus, Trash2, Package, FileText, Building, Pencil, Copy,
-  X, GitCommit, Eye, AlertTriangle, Check, Calendar, Loader2
+  X, GitCommit, Eye, AlertTriangle, Check, Calendar, Loader2, Hash
 } from "lucide-react"
 import { PartForm } from "@/components/forms/PartForm"
 import { POAuditTrail } from "./POAuditTrail"
@@ -131,6 +131,10 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
   const [isCloning, setIsCloning] = useState(false)
   const [cloneConfirmOpen, setCloneConfirmOpen] = useState(false)
 
+  // ===== Cost Codes =====
+  const [costCodes, setCostCodes] = useState<CostCode[]>([])
+  const [savingCostCode, setSavingCostCode] = useState(false)
+
   // ===== Receiving Mode State =====
   const [stagedReceivings, setStagedReceivings] = useState<Map<number, {
     qty_received: number;
@@ -189,6 +193,7 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
     fetchPO()
     fetchParts()
     api.companySettings.get().then(setCompanySettings).catch(() => {})
+    api.costCodes.getAll().then(setCostCodes).catch(() => {})
   }, [poId])
 
   // ===== Navigation Guard =====
@@ -557,6 +562,21 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
       alert(err instanceof Error ? err.message : "Failed to update expected delivery date")
     } finally {
       setSavingDeliveryDate(false)
+    }
+  }
+
+  const handleCostCodeChange = async (value: string) => {
+    const costCodeId = parseInt(value)
+    if (isNaN(costCodeId)) return
+    setSavingCostCode(true)
+    try {
+      await api.purchaseOrders.update(poId, { cost_code_id: costCodeId })
+      fetchPO()
+      onUpdate?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update cost code")
+    } finally {
+      setSavingCostCode(false)
     }
   }
 
@@ -1209,7 +1229,7 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
           <CardTitle className="text-base">Order Details</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Work Description */}
             <div className="space-y-1">
               <Label className="text-sm text-muted-foreground">Work Description</Label>
@@ -1358,6 +1378,25 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
                     <Pencil className="h-3 w-3" />
                   </Button>
                 </div>
+              )}
+            </div>
+
+            {/* Cost Code */}
+            <div className="space-y-1">
+              <Label className="text-sm text-muted-foreground flex items-center gap-1">
+                <Hash className="h-3 w-3" />
+                Cost Code
+              </Label>
+              <SearchableSelect
+                options={costCodes.map(cc => ({ value: cc.id.toString(), label: `${cc.code} - ${cc.description}` }))}
+                value={po.cost_code_id?.toString()}
+                onChange={handleCostCodeChange}
+                placeholder="Select cost code..."
+                searchPlaceholder="Search cost codes..."
+                disabled={savingCostCode}
+              />
+              {savingCostCode && (
+                <p className="text-xs text-muted-foreground">Saving...</p>
               )}
             </div>
           </div>

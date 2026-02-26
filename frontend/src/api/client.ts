@@ -3,6 +3,7 @@ import type {
   Labor, LaborCreate,
   Miscellaneous, MiscellaneousCreate,
   DiscountCode, DiscountCodeCreate,
+  CostCode, CostCodeCreate, CostCodeUpdate,
   Profile, ProfileCreate, ProfileUpdate, ProfileType,
   Contact, ContactCreate, ContactUpdate,
   Project, ProjectCreate, ProjectFull,
@@ -261,6 +262,18 @@ export const api = {
     // Clone
     clone: (poId: number) =>
       request<PurchaseOrder>(`/purchase-orders/${poId}/clone`, { method: 'POST' }),
+  },
+
+  // ===== Cost Codes =====
+  costCodes: {
+    getAll: () => request<CostCode[]>('/cost-codes/'),
+    get: (id: number) => request<CostCode>(`/cost-codes/${id}`),
+    create: (data: CostCodeCreate) =>
+      request<CostCode>('/cost-codes/', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: number, data: CostCodeUpdate) =>
+      request<CostCode>(`/cost-codes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id: number) =>
+      request<{ message: string }>(`/cost-codes/${id}`, { method: 'DELETE' }),
   },
 
   // ===== Reports =====

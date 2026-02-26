@@ -87,6 +87,32 @@ class POStatus(str, Enum):
     closed = "Closed"
 
 
+# ===== Cost Code Schemas =====
+class CostCodeBase(BaseModel):
+    code: str
+    description: str
+    gp_cost_code_properties: Optional[str] = None
+    uch_dept_properties: Optional[str] = None
+
+
+class CostCodeCreate(CostCodeBase):
+    pass
+
+
+class CostCodeUpdate(BaseModel):
+    code: Optional[str] = None
+    description: Optional[str] = None
+    gp_cost_code_properties: Optional[str] = None
+    uch_dept_properties: Optional[str] = None
+
+
+class CostCode(CostCodeBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
 # ===== Category Schemas =====
 class CategoryBase(BaseModel):
     name: str
@@ -431,11 +457,13 @@ class QuoteCreate(BaseModel):
     project_id: int
     client_po_number: Optional[str] = None
     work_description: Optional[str] = None
+    cost_code_id: Optional[int] = None
 
 
 class QuoteUpdate(BaseModel):
     client_po_number: Optional[str] = None
     work_description: Optional[str] = None
+    cost_code_id: Optional[int] = None
 
 
 class Quote(QuoteBase):
@@ -444,6 +472,8 @@ class Quote(QuoteBase):
     quote_number: Optional[str] = None  # Computed: "{UCA Project Number}-{Sequence:04d}-{Version}"
     created_at: datetime
     current_version: int = 0
+    cost_code_id: Optional[int] = None
+    cost_code: Optional[CostCode] = None
     line_items: List[QuoteLineItem] = []
 
     class Config:
@@ -496,7 +526,7 @@ class PurchaseOrderBase(BaseModel):
 
 
 class PurchaseOrderCreate(PurchaseOrderBase):
-    pass
+    cost_code_id: Optional[int] = None
 
 
 class PurchaseOrderUpdate(BaseModel):
@@ -504,6 +534,7 @@ class PurchaseOrderUpdate(BaseModel):
     work_description: Optional[str] = None
     vendor_po_number: Optional[str] = None
     expected_delivery_date: Optional[datetime] = None
+    cost_code_id: Optional[int] = None
 
 
 class PurchaseOrder(PurchaseOrderBase):
@@ -512,6 +543,8 @@ class PurchaseOrder(PurchaseOrderBase):
     po_sequence: int
     current_version: int = 0
     po_number: Optional[str] = None
+    cost_code_id: Optional[int] = None
+    cost_code: Optional[CostCode] = None
     vendor: Profile
     line_items: List[POLineItem] = []
 

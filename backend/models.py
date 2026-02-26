@@ -130,6 +130,16 @@ class Miscellaneous(Base):
     category = relationship("Category")
 
 
+class CostCode(Base):
+    __tablename__ = "cost_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, unique=True, nullable=False)
+    description = Column(String, nullable=False)
+    gp_cost_code_properties = Column(String, nullable=True)
+    uch_dept_properties = Column(String, nullable=True)
+
+
 class DiscountCode(Base):
     __tablename__ = "discount_codes"
 
@@ -173,12 +183,14 @@ class Quote(Base):
     work_description = Column(String, nullable=True)  # Optional work description
     markup_control_enabled = Column(Boolean, default=False)  # Markup Discount Control toggle
     global_markup_percent = Column(Float, nullable=True)  # Global markup % when control is enabled
+    cost_code_id = Column(Integer, ForeignKey('cost_codes.id'), nullable=False)
 
     # Relationships
     project = relationship("Project", back_populates="quotes")
     line_items = relationship("QuoteLineItem", back_populates="quote", cascade="all, delete-orphan")
     invoices = relationship("Invoice", back_populates="quote", order_by="Invoice.created_at")
     snapshots = relationship("QuoteSnapshot", back_populates="quote", order_by="QuoteSnapshot.version")
+    cost_code = relationship("CostCode")
 
 
 class QuoteLineItem(Base):
@@ -225,6 +237,7 @@ class PurchaseOrder(Base):
     vendor_po_number = Column(String, nullable=True)
     expected_delivery_date = Column(DateTime, nullable=True)
     status = Column(Enum(POStatus), default=POStatus.draft)
+    cost_code_id = Column(Integer, ForeignKey('cost_codes.id'), nullable=False)
 
     # Relationships
     project = relationship("Project", back_populates="purchase_orders")
@@ -232,6 +245,7 @@ class PurchaseOrder(Base):
     line_items = relationship("POLineItem", back_populates="purchase_order", cascade="all, delete-orphan")
     receivings = relationship("POReceiving", back_populates="purchase_order", order_by="POReceiving.created_at")
     snapshots = relationship("POSnapshot", back_populates="purchase_order", order_by="POSnapshot.version")
+    cost_code = relationship("CostCode")
 
 
 class POLineItem(Base):

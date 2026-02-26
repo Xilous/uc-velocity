@@ -4,9 +4,35 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { api } from '@/api/client'
-import type { CompanySettings, CompanySettingsUpdate } from '@/types'
-import { Loader2, Save } from 'lucide-react'
+import type { CompanySettings, CompanySettingsUpdate, CostCode, CostCodeCreate } from '@/types'
+import { Loader2, Save, Pencil, Trash2, Plus, X, Check } from 'lucide-react'
+
+// Inline editing row state
+interface CostCodeEditState {
+  code: string
+  description: string
+  gp_cost_code_properties: string
+  uch_dept_properties: string
+}
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<CompanySettings | null>(null)
@@ -23,8 +49,20 @@ export function SettingsPage() {
   const [gstNumber, setGstNumber] = useState('')
   const [hstRate, setHstRate] = useState('')
 
+  // Cost codes state
+  const [costCodes, setCostCodes] = useState<CostCode[]>([])
+  const [costCodesLoading, setCostCodesLoading] = useState(true)
+  const [editingCostCodeId, setEditingCostCodeId] = useState<number | null>(null)
+  const [editingCostCode, setEditingCostCode] = useState<CostCodeEditState | null>(null)
+  const [addingCostCode, setAddingCostCode] = useState(false)
+  const [newCostCode, setNewCostCode] = useState<CostCodeEditState>({ code: '', description: '', gp_cost_code_properties: '', uch_dept_properties: '' })
+  const [costCodeSaving, setCostCodeSaving] = useState(false)
+  const [costCodeError, setCostCodeError] = useState<string | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<CostCode | null>(null)
+
   useEffect(() => {
     fetchSettings()
+    fetchCostCodes()
   }, [])
 
   const fetchSettings = async () => {
@@ -43,6 +81,18 @@ export function SettingsPage() {
       setError(err instanceof Error ? err.message : 'Failed to load settings')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchCostCodes = async () => {
+    setCostCodesLoading(true)
+    try {
+      const data = await api.costCodes.getAll()
+      setCostCodes(data)
+    } catch (err) {
+      setCostCodeError(err instanceof Error ? err.message : 'Failed to load cost codes')
+    } finally {
+      setCostCodesLoading(false)
     }
   }
 
@@ -74,6 +124,98 @@ export function SettingsPage() {
       setError(err instanceof Error ? err.message : 'Failed to save settings')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Cost code CRUD handlers
+  const startEditCostCode = (cc: CostCode) => {
+    setEditingCostCodeId(cc.id)
+    setEditingCostCode({
+      code: cc.code,
+      description: cc.description,
+      gp_cost_code_properties: cc.gp_cost_code_properties || '',
+      uch_dept_properties: cc.uch_dept_properties || '',
+    })
+    setCostCodeError(null)
+  }
+
+  const cancelEditCostCode = () => {
+    setEditingCostCodeId(null)
+    setEditingCostCode(null)
+  }
+
+  const saveEditCostCode = async () => {
+    if (!editingCostCode || editingCostCodeId === null) return
+    if (!editingCostCode.code.trim() || !editingCostCode.description.trim()) {
+      setCostCodeError('Code and Description are required.')
+      return
+    }
+
+    setCostCodeSaving(true)
+    setCostCodeError(null)
+    try {
+      await api.costCodes.update(editingCostCodeId, {
+        code: editingCostCode.code.trim(),
+        description: editingCostCode.description.trim(),
+        gp_cost_code_properties: editingCostCode.gp_cost_code_properties.trim() || undefined,
+        uch_dept_properties: editingCostCode.uch_dept_properties.trim() || undefined,
+      })
+      setEditingCostCodeId(null)
+      setEditingCostCode(null)
+      fetchCostCodes()
+    } catch (err) {
+      setCostCodeError(err instanceof Error ? err.message : 'Failed to update cost code')
+    } finally {
+      setCostCodeSaving(false)
+    }
+  }
+
+  const startAddCostCode = () => {
+    setAddingCostCode(true)
+    setNewCostCode({ code: '', description: '', gp_cost_code_properties: '', uch_dept_properties: '' })
+    setCostCodeError(null)
+  }
+
+  const cancelAddCostCode = () => {
+    setAddingCostCode(false)
+    setNewCostCode({ code: '', description: '', gp_cost_code_properties: '', uch_dept_properties: '' })
+  }
+
+  const saveNewCostCode = async () => {
+    if (!newCostCode.code.trim() || !newCostCode.description.trim()) {
+      setCostCodeError('Code and Description are required.')
+      return
+    }
+
+    setCostCodeSaving(true)
+    setCostCodeError(null)
+    try {
+      const data: CostCodeCreate = {
+        code: newCostCode.code.trim(),
+        description: newCostCode.description.trim(),
+        gp_cost_code_properties: newCostCode.gp_cost_code_properties.trim() || undefined,
+        uch_dept_properties: newCostCode.uch_dept_properties.trim() || undefined,
+      }
+      await api.costCodes.create(data)
+      setAddingCostCode(false)
+      setNewCostCode({ code: '', description: '', gp_cost_code_properties: '', uch_dept_properties: '' })
+      fetchCostCodes()
+    } catch (err) {
+      setCostCodeError(err instanceof Error ? err.message : 'Failed to create cost code')
+    } finally {
+      setCostCodeSaving(false)
+    }
+  }
+
+  const deleteCostCode = async (cc: CostCode) => {
+    setCostCodeError(null)
+    try {
+      await api.costCodes.delete(cc.id)
+      setDeleteConfirm(null)
+      fetchCostCodes()
+    } catch (err) {
+      setDeleteConfirm(null)
+      setCostCodeError(err instanceof Error ? err.message : 'Failed to delete cost code')
     }
   }
 
@@ -194,6 +336,208 @@ export function SettingsPage() {
           Save Settings
         </Button>
       </div>
+
+      {/* Cost Codes */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Cost Codes</CardTitle>
+          <Button
+            size="sm"
+            onClick={startAddCostCode}
+            disabled={addingCostCode || editingCostCodeId !== null}
+            className="gap-1"
+          >
+            <Plus className="h-4 w-4" />
+            Add New
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {costCodeError && (
+            <div className="p-3 mb-4 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-sm">
+              {costCodeError}
+            </div>
+          )}
+
+          {costCodesLoading ? (
+            <div className="p-4 text-center text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
+              Loading cost codes...
+            </div>
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[120px]">Code</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead className="w-[180px]">GP Properties</TableHead>
+                    <TableHead className="w-[180px]">UCH Dept Properties</TableHead>
+                    <TableHead className="w-[100px] text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {costCodes.map((cc) => (
+                    <TableRow key={cc.id}>
+                      {editingCostCodeId === cc.id && editingCostCode ? (
+                        <>
+                          <TableCell>
+                            <Input
+                              value={editingCostCode.code}
+                              onChange={(e) => setEditingCostCode({ ...editingCostCode, code: e.target.value })}
+                              className="h-8"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              value={editingCostCode.description}
+                              onChange={(e) => setEditingCostCode({ ...editingCostCode, description: e.target.value })}
+                              className="h-8"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              value={editingCostCode.gp_cost_code_properties}
+                              onChange={(e) => setEditingCostCode({ ...editingCostCode, gp_cost_code_properties: e.target.value })}
+                              className="h-8"
+                              placeholder="Optional"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              value={editingCostCode.uch_dept_properties}
+                              onChange={(e) => setEditingCostCode({ ...editingCostCode, uch_dept_properties: e.target.value })}
+                              className="h-8"
+                              placeholder="Optional"
+                            />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={saveEditCostCode} disabled={costCodeSaving}>
+                                {costCodeSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 text-green-600" />}
+                              </Button>
+                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={cancelEditCostCode}>
+                                <X className="h-4 w-4 text-muted-foreground" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </>
+                      ) : (
+                        <>
+                          <TableCell className="font-mono text-sm">{cc.code}</TableCell>
+                          <TableCell>{cc.description}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{cc.gp_cost_code_properties || '—'}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{cc.uch_dept_properties || '—'}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7"
+                                onClick={() => startEditCostCode(cc)}
+                                disabled={addingCostCode || editingCostCodeId !== null}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 text-destructive hover:text-destructive"
+                                onClick={() => setDeleteConfirm(cc)}
+                                disabled={addingCostCode || editingCostCodeId !== null}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </>
+                      )}
+                    </TableRow>
+                  ))}
+
+                  {/* Add new row */}
+                  {addingCostCode && (
+                    <TableRow>
+                      <TableCell>
+                        <Input
+                          value={newCostCode.code}
+                          onChange={(e) => setNewCostCode({ ...newCostCode, code: e.target.value })}
+                          className="h-8"
+                          placeholder="e.g. 999-100"
+                          autoFocus
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={newCostCode.description}
+                          onChange={(e) => setNewCostCode({ ...newCostCode, description: e.target.value })}
+                          className="h-8"
+                          placeholder="Description"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={newCostCode.gp_cost_code_properties}
+                          onChange={(e) => setNewCostCode({ ...newCostCode, gp_cost_code_properties: e.target.value })}
+                          className="h-8"
+                          placeholder="Optional"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={newCostCode.uch_dept_properties}
+                          onChange={(e) => setNewCostCode({ ...newCostCode, uch_dept_properties: e.target.value })}
+                          className="h-8"
+                          placeholder="Optional"
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={saveNewCostCode} disabled={costCodeSaving}>
+                            {costCodeSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 text-green-600" />}
+                          </Button>
+                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={cancelAddCostCode}>
+                            <X className="h-4 w-4 text-muted-foreground" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+
+                  {costCodes.length === 0 && !addingCostCode && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                        No cost codes found. Click "Add New" to create one.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Cost Code</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete cost code <strong>{deleteConfirm?.code}</strong> ({deleteConfirm?.description})?
+              This cannot be undone. If this cost code is used by any quotes or purchase orders, deletion will be blocked.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => deleteConfirm && deleteCostCode(deleteConfirm)}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
