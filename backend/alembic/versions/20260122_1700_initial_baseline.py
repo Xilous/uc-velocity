@@ -209,7 +209,7 @@ def upgrade() -> None:
         sa.Column('project_id', sa.Integer(), sa.ForeignKey('projects.id'), nullable=False),
         sa.Column('vendor_id', sa.Integer(), sa.ForeignKey('profiles.id'), nullable=False),
         sa.Column('created_at', sa.DateTime()),
-        sa.Column('status', sa.String(), server_default='Draft'),
+        sa.Column('status', sa.String(), server_default='draft'),
     )
     op.create_index('ix_purchase_orders_id', 'purchase_orders', ['id'])
 
