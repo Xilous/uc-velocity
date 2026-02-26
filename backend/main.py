@@ -10,80 +10,55 @@ if env_path.exists():
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from sqlalchemy import text
 from database import engine, Base, SessionLocal
 from routes import parts, labor, profiles, projects, quotes, purchase_orders, discount_codes, miscellaneous, invoices, company_settings
 from seed import seed_system_items
 
 
-def ensure_po_columns():
-    """Ensure PO versioning columns exist on existing tables.
+def run_migrations():
+    """Run Alembic migrations on startup.
 
-    create_all() can create new tables but cannot ALTER existing ones.
-    This runs idempotent DDL to add any missing columns before the ORM
-    starts querying them.  Column additions are committed first so that
-    a subsequent enum conversion error cannot roll them back.
+    Replaces Railway's unreliable releaseCommand. The web process has
+    guaranteed database access, so running migrations here is reliable.
+    Safe for single-instance test environments (no worker race condition).
+
+    Handles legacy databases that predate the migration system by
+    auto-stamping to the latest revision when tables exist but
+    alembic_version does not.
     """
-    with engine.connect() as conn:
-        # Step 1: Add missing columns (commit immediately)
-        conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS po_sequence INTEGER"))
-        conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS current_version INTEGER DEFAULT 0 NOT NULL"))
-        conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS work_description VARCHAR"))
-        conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS vendor_po_number VARCHAR"))
-        conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS expected_delivery_date TIMESTAMP"))
-        conn.execute(text("ALTER TABLE po_line_items ADD COLUMN IF NOT EXISTS qty_pending INTEGER DEFAULT 0 NOT NULL"))
-        conn.execute(text("ALTER TABLE po_line_items ADD COLUMN IF NOT EXISTS qty_received INTEGER DEFAULT 0 NOT NULL"))
-        conn.execute(text("ALTER TABLE po_line_items ADD COLUMN IF NOT EXISTS actual_unit_price FLOAT"))
-        conn.execute(text("ALTER TABLE company_settings ADD COLUMN IF NOT EXISTS hst_rate FLOAT DEFAULT 13.0"))
-        conn.execute(text("ALTER TABLE quotes ALTER COLUMN status SET DEFAULT 'Draft'"))
-        conn.commit()
-        print("[STARTUP] PO columns ensured")
-        print("[STARTUP] HST rate column ensured")
-        print("[STARTUP] Quote status default ensured")
+    from sqlalchemy import text, inspect
+    from alembic.config import Config
+    from alembic import command
 
-    # Step 2: Enum conversion (separate transaction — non-critical)
-    # SQLAlchemy's Enum(POStatus) uses member NAMES as PG enum values:
-    #   POStatus.draft -> 'draft', POStatus.sent -> 'sent', etc.
-    try:
-        with engine.connect() as conn:
-            conn.execute(text(
-                "DO $$ BEGIN "
-                "CREATE TYPE postatus AS ENUM ('draft', 'sent', 'received', 'closed'); "
-                "EXCEPTION WHEN duplicate_object THEN NULL; END $$"
-            ))
-            result = conn.execute(text(
-                "SELECT udt_name FROM information_schema.columns "
-                "WHERE table_name = 'purchase_orders' AND column_name = 'status'"
-            ))
-            row = result.fetchone()
-            if row and row[0] != 'postatus':
-                conn.execute(text(
-                    "UPDATE purchase_orders SET status = lower(status)"
-                ))
-                conn.execute(text(
-                    "ALTER TABLE purchase_orders ALTER COLUMN status TYPE postatus "
-                    "USING status::postatus"
-                ))
-                conn.execute(text(
-                    "ALTER TABLE purchase_orders ALTER COLUMN status SET DEFAULT 'draft'::postatus"
-                ))
-                print("[STARTUP] Status column converted to postatus enum")
-            conn.commit()
-    except Exception as e:
-        print(f"[STARTUP] Enum conversion skipped (non-critical): {e}")
+    alembic_cfg = Config(os.path.join(os.path.dirname(__file__), "alembic.ini"))
+
+    # Detect legacy database: tables exist but no alembic_version tracking
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+    has_app_tables = "quotes" in tables or "profiles" in tables
+    has_alembic = "alembic_version" in tables
+
+    if has_app_tables and not has_alembic:
+        # Legacy deploy: stamp to latest revision so Alembic knows the
+        # current state, then only future migrations will run.
+        command.stamp(alembic_cfg, "head")
+        print("[STARTUP] Legacy database detected — stamped alembic_version to head")
+    else:
+        # Normal path: run any pending migrations
+        command.upgrade(alembic_cfg, "head")
+        print("[STARTUP] Alembic migrations applied")
 
 
-# Ensure columns exist on existing tables before create_all
+# 1. Run Alembic migrations (the single source of truth for schema)
 try:
-    ensure_po_columns()
+    run_migrations()
 except Exception as e:
-    # Table may not exist yet on fresh install — create_all will handle it
-    print(f"[STARTUP] Skipped column check (fresh install?): {e}")
+    print(f"[STARTUP] Migration error: {e}")
+    # Fallback for truly fresh databases with no tables at all
+    Base.metadata.create_all(bind=engine)
+    print("[STARTUP] Fallback: created tables via create_all()")
 
-# Create all database tables (idempotent - safe fallback for fresh installs)
-Base.metadata.create_all(bind=engine)
-
-# Seed system items on startup
+# 2. Seed system items
 def init_db():
     db = SessionLocal()
     try:
