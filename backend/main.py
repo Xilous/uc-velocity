@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine, Base, SessionLocal
-from routes import parts, labor, profiles, projects, quotes, purchase_orders, discount_codes, miscellaneous, invoices, company_settings
+from routes import parts, labor, profiles, projects, quotes, purchase_orders, discount_codes, miscellaneous, invoices, company_settings, reports
 from seed import seed_system_items
 
 
@@ -110,6 +110,7 @@ app.include_router(discount_codes.router)
 app.include_router(miscellaneous.router)
 app.include_router(invoices.router)
 app.include_router(company_settings.router)
+app.include_router(reports.router)
 
 
 @app.get("/")

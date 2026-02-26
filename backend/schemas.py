@@ -49,6 +49,32 @@ class InvoiceSummaryItem(BaseModel):
     grand_total: float
 
 
+# ===== Backlog Quotes Report =====
+class BacklogLineItem(BaseModel):
+    line_item_id: int
+    item_type: str
+    description: str
+    quantity: int
+    qty_fulfilled: int
+    qty_pending: int
+    unit_price: float
+    discount_percent: float = 0.0
+    backlog_value: float
+
+
+class BacklogQuoteItem(BaseModel):
+    quote_id: int
+    quote_number: str
+    uca_project_number: str
+    customer_name: str
+    project_name: str
+    client_po_number: Optional[str] = None
+    status: str
+    quote_total: float
+    backlog_total: float
+    line_items: List[BacklogLineItem] = []
+
+
 class PhoneType(str, Enum):
     work = "work"
     mobile = "mobile"

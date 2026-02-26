@@ -13,7 +13,8 @@ import type {
   Invoice, InvoiceCreate, InvoiceStatusUpdate, QuoteSnapshot, RevertPreview,
   MarkupControlToggleRequest, MarkupControlToggleResponse,
   CommitEditsRequest, CommitEditsResponse,
-  CompanySettings, CompanySettingsUpdate, InvoiceSummaryItem
+  CompanySettings, CompanySettingsUpdate, InvoiceSummaryItem,
+  BacklogQuoteItem
 } from '@/types';
 
 // API base URL - configurable via environment variable for production
@@ -260,5 +261,10 @@ export const api = {
     // Clone
     clone: (poId: number) =>
       request<PurchaseOrder>(`/purchase-orders/${poId}/clone`, { method: 'POST' }),
+  },
+
+  // ===== Reports =====
+  reports: {
+    getBacklogQuotes: () => request<BacklogQuoteItem[]>('/reports/backlog-quotes'),
   },
 };
