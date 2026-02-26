@@ -179,13 +179,15 @@ def upgrade():
     ))
     row = result.fetchone()
     if row and row[1] != 'postatus':
-        op.alter_column(
-            'purchase_orders',
-            'status',
-            type_=sa.Enum('draft', 'sent', 'received', 'closed', name='postatus'),
-            server_default='draft',
-            postgresql_using='status::postatus'
-        )
+        # Drop VARCHAR default before TYPE change — PG can't auto-cast defaults to enum
+        conn.execute(sa.text("ALTER TABLE purchase_orders ALTER COLUMN status DROP DEFAULT"))
+        conn.execute(sa.text("UPDATE purchase_orders SET status = lower(status)"))
+        conn.execute(sa.text(
+            "ALTER TABLE purchase_orders ALTER COLUMN status TYPE postatus USING status::postatus"
+        ))
+        conn.execute(sa.text(
+            "ALTER TABLE purchase_orders ALTER COLUMN status SET DEFAULT 'draft'::postatus"
+        ))
         print("[ALTERED] purchase_orders.status to POStatus enum")
     else:
         print("[SKIPPED] purchase_orders.status already POStatus enum")
