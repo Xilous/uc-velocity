@@ -394,19 +394,20 @@ class QuoteLineItem(QuoteLineItemBase):
 # ===== Quote Schemas =====
 class QuoteBase(BaseModel):
     project_id: int
-    status: str = "Active"  # "Active" or "Invoiced"
+    status: str = "Draft"  # "Draft", "Work Order", "Invoiced", "Closed" — computed by system
     client_po_number: Optional[str] = None
     work_description: Optional[str] = None
     markup_control_enabled: bool = False  # Markup Discount Control toggle
     global_markup_percent: Optional[float] = None  # Global markup % when control is enabled
 
 
-class QuoteCreate(QuoteBase):
-    pass
+class QuoteCreate(BaseModel):
+    project_id: int
+    client_po_number: Optional[str] = None
+    work_description: Optional[str] = None
 
 
 class QuoteUpdate(BaseModel):
-    status: Optional[str] = None
     client_po_number: Optional[str] = None
     work_description: Optional[str] = None
 

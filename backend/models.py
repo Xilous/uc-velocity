@@ -167,7 +167,7 @@ class Quote(Base):
     project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
     quote_sequence = Column(Integer, nullable=False)  # Per-project sequence number (1, 2, 3...)
     created_at = Column(DateTime, default=datetime.utcnow)
-    status = Column(String, default="Active")  # "Active" or "Invoiced"
+    status = Column(String, default="Draft")  # "Draft", "Work Order", "Invoiced", "Closed" — computed by system
     current_version = Column(Integer, default=0)  # Current snapshot version
     client_po_number = Column(String, nullable=True)  # Client's PO number (required for invoicing)
     work_description = Column(String, nullable=True)  # Optional work description

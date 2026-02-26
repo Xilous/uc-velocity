@@ -233,17 +233,37 @@ def format_quote_number(uca_project_number: str, quote_sequence: int, current_ve
     return f"{uca_project_number}-{quote_sequence:04d}-{current_version}"
 
 
+def compute_quote_status(quote: Quote) -> str:
+    """Derive quote status from its current state.
+
+    Requires quote.line_items to be loaded.
+    """
+    has_line_items = len(quote.line_items) > 0
+    has_fulfillment = any(li.qty_fulfilled > 0 for li in quote.line_items)
+    all_fulfilled = has_line_items and all(li.qty_pending == 0 for li in quote.line_items)
+    has_client_po = bool(quote.client_po_number and quote.client_po_number.strip())
+
+    if all_fulfilled and has_fulfillment:
+        return "Closed"
+    if has_fulfillment:
+        return "Invoiced"
+    if has_client_po:
+        return "Work Order"
+    return "Draft"
+
+
 def populate_quote_number(quote: Quote, uca_project_number: str) -> QuoteSchema:
     """
-    Convert a Quote ORM object to a QuoteSchema with computed quote_number.
+    Convert a Quote ORM object to a QuoteSchema with computed quote_number and status.
 
     Args:
         quote: The Quote ORM object
         uca_project_number: The project's UCA number
 
     Returns:
-        QuoteSchema with quote_number populated
+        QuoteSchema with quote_number and status populated
     """
+    quote.status = compute_quote_status(quote)
     response = QuoteSchema.model_validate(quote)
     response.quote_number = format_quote_number(
         uca_project_number,
@@ -311,7 +331,6 @@ def create_quote(quote_data: QuoteCreate, db: Session = Depends(get_db)):
     db_quote = Quote(
         project_id=quote_data.project_id,
         quote_sequence=next_sequence,
-        status=quote_data.status,
         client_po_number=quote_data.client_po_number,
         work_description=quote_data.work_description
     )
@@ -334,11 +353,6 @@ def update_quote(quote_id: int, quote_data: QuoteUpdate, db: Session = Depends(g
     )
     if not db_quote:
         raise HTTPException(status_code=404, detail="Quote not found")
-
-    if quote_data.status is not None:
-        if quote_data.status not in ["Active", "Invoiced"]:
-            raise HTTPException(status_code=400, detail="Status must be 'Active' or 'Invoiced'")
-        db_quote.status = quote_data.status
 
     if quote_data.client_po_number is not None:
         db_quote.client_po_number = quote_data.client_po_number.strip() or None
@@ -371,7 +385,6 @@ def clone_quote(quote_id: int, db: Session = Depends(get_db)):
     Clone a quote and all its line items.
 
     Creates an exact copy of the quote with:
-    - Status reset to "Active"
     - Fulfillment quantities reset (qty_fulfilled=0, qty_pending=quantity)
     - Markup control disabled
     - Same project, client_po_number, and work_description
@@ -398,7 +411,7 @@ def clone_quote(quote_id: int, db: Session = Depends(get_db)):
     new_quote = Quote(
         project_id=source_quote.project_id,
         quote_sequence=next_sequence,  # New sequence number
-        status="Active",  # Always reset to Active
+        # status will be computed by populate_quote_number() on response
         client_po_number=source_quote.client_po_number,
         work_description=source_quote.work_description,
         markup_control_enabled=False,  # Reset to disabled

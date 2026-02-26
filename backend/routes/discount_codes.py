@@ -89,14 +89,14 @@ def update_discount_code(
         db_discount_code.discount_percent = round(data.discount_percent, 2)
 
     if data.is_archived is not None:
-        # If trying to archive, check if used in active quotes
+        # If trying to archive, check if used in non-closed quotes
         if data.is_archived:
             active_usage = (
                 db.query(QuoteLineItem)
                 .join(Quote)
                 .filter(
                     QuoteLineItem.discount_code_id == discount_code_id,
-                    Quote.status == "Active"
+                    QuoteLineItem.qty_pending > 0
                 )
                 .first()
             )
@@ -119,13 +119,13 @@ def archive_discount_code(discount_code_id: int, db: Session = Depends(get_db)):
     if not db_discount_code:
         raise HTTPException(status_code=404, detail="Discount code not found")
 
-    # Check if used in active quotes
+    # Check if used in non-closed quotes (any line items with pending qty)
     active_usage = (
         db.query(QuoteLineItem)
         .join(Quote)
         .filter(
             QuoteLineItem.discount_code_id == discount_code_id,
-            Quote.status == "Active"
+            QuoteLineItem.qty_pending > 0
         )
         .first()
     )

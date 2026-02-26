@@ -23,13 +23,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
   Table,
   TableBody,
   TableCell,
@@ -51,7 +44,7 @@ import type { SearchableSelectOption } from "@/components/ui/searchable-select"
 import { api } from "@/api/client"
 import type {
   Quote, QuoteLineItem, QuoteLineItemCreate, QuoteLineItemUpdate,
-  LineItemType, Part, Labor, Miscellaneous, DiscountCode, QuoteStatus,
+  LineItemType, Part, Labor, Miscellaneous, DiscountCode,
   StagedFulfillment, InvoiceCreate, QuoteEditorMode, StagedEdit, StagedAdd,
   StagedLineItemChange, CommitEditsRequest
 } from "@/types"
@@ -555,16 +548,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       onUpdate?.()
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to delete line item")
-    }
-  }
-
-  const handleStatusChange = async (newStatus: QuoteStatus) => {
-    try {
-      await api.quotes.update(quoteId, { status: newStatus })
-      fetchQuote()
-      onUpdate?.()
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to update status")
     }
   }
 
@@ -2567,15 +2550,17 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
             <Copy className="h-4 w-4" />
             {isCloning ? "Cloning..." : "Clone Quote"}
           </Button>
-          <Select value={quote.status} onValueChange={(v) => handleStatusChange(v as QuoteStatus)}>
-            <SelectTrigger className="w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="Active">Active</SelectItem>
-              <SelectItem value="Invoiced">Invoiced</SelectItem>
-            </SelectContent>
-          </Select>
+          <Badge
+            variant={quote.status === "Closed" ? "default" : "secondary"}
+            className={
+              quote.status === "Draft" ? "bg-gray-100 text-gray-700 border-gray-300" :
+              quote.status === "Work Order" ? "bg-blue-100 text-blue-700 border-blue-300" :
+              quote.status === "Invoiced" ? "bg-amber-100 text-amber-700 border-amber-300" :
+              "bg-green-100 text-green-700 border-green-300"
+            }
+          >
+            {quote.status}
+          </Badge>
         </div>
       </div>
 

@@ -254,7 +254,7 @@ export interface QuoteLineItemUpdate {
 }
 
 // ===== Quotes =====
-export type QuoteStatus = 'Active' | 'Invoiced';
+export type QuoteStatus = 'Draft' | 'Work Order' | 'Invoiced' | 'Closed';
 
 // ===== Purchase Orders Status =====
 export type POStatus = 'Draft' | 'Sent' | 'Received' | 'Closed';
@@ -276,13 +276,11 @@ export interface Quote {
 
 export interface QuoteCreate {
   project_id: number;
-  status?: QuoteStatus;
   client_po_number?: string;
   work_description?: string;
 }
 
 export interface QuoteUpdate {
-  status?: QuoteStatus;
   client_po_number?: string | null;
   work_description?: string | null;
 }

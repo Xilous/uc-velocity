@@ -303,8 +303,21 @@ export function ProjectDetailsPage({ projectId, onBack }: ProjectDetailsPageProp
                         }`}
                         onClick={() => guardedNavigate(() => setSelectedDoc({ type: "quote", id: quote.id }))}
                       >
-                        <div>
-                          <div className="text-sm font-medium">{quote.quote_number}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium flex items-center gap-2">
+                            {quote.quote_number}
+                            <Badge
+                              variant="secondary"
+                              className={`text-[10px] px-1.5 py-0 ${
+                                quote.status === "Draft" ? "bg-gray-100 text-gray-600" :
+                                quote.status === "Work Order" ? "bg-blue-100 text-blue-600" :
+                                quote.status === "Invoiced" ? "bg-amber-100 text-amber-600" :
+                                "bg-green-100 text-green-600"
+                              }`}
+                            >
+                              {quote.status}
+                            </Badge>
+                          </div>
                           <div className="text-xs text-muted-foreground">
                             {new Date(quote.created_at).toLocaleDateString()}
                           </div>
@@ -312,7 +325,7 @@ export function ProjectDetailsPage({ projectId, onBack }: ProjectDetailsPageProp
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="opacity-0 group-hover:opacity-100 h-6 w-6 p-0"
+                          className="opacity-0 group-hover:opacity-100 h-6 w-6 p-0 flex-shrink-0"
                           onClick={(e) => handleDeleteQuote(quote.id, e)}
                         >
                           <Trash2 className="h-3 w-3 text-destructive" />
