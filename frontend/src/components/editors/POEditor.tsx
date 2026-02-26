@@ -52,12 +52,14 @@ import type {
   PurchaseOrder, POLineItem, POLineItemCreate, POLineItemType, POStatus, Part, CostCode,
   POEditorMode, StagedPOEdit, StagedPOAdd,
   StagedPOLineItemChange, POCommitEditsRequest, POReceivingCreate, POReceivingLineItemCreate,
-  CompanySettings
+  CompanySettings, Project
 } from "@/types"
 import {
   Plus, Minus, Trash2, Package, FileText, Building, Pencil, Copy,
-  X, GitCommit, Eye, AlertTriangle, Check, Calendar, Loader2, Hash
+  X, GitCommit, Eye, AlertTriangle, Check, Calendar, Loader2, Hash, Printer
 } from "lucide-react"
+import { pdf } from '@react-pdf/renderer'
+import { PurchaseOrderPDF } from '@/components/pdf/PurchaseOrderPDF'
 import { PartForm } from "@/components/forms/PartForm"
 import { POAuditTrail } from "./POAuditTrail"
 
@@ -130,6 +132,9 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
   // ===== Clone State =====
   const [isCloning, setIsCloning] = useState(false)
   const [cloneConfirmOpen, setCloneConfirmOpen] = useState(false)
+
+  // Print PDF state
+  const [isPrinting, setIsPrinting] = useState(false)
 
   // ===== Cost Codes =====
   const [costCodes, setCostCodes] = useState<CostCode[]>([])
@@ -622,6 +627,28 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
       alert(err instanceof Error ? err.message : "Failed to clone purchase order")
     } finally {
       setIsCloning(false)
+    }
+  }
+
+  // ===== Print PO Handler =====
+
+  const handlePrintPO = async () => {
+    if (!po) return
+    setIsPrinting(true)
+    try {
+      const [project, companySettings] = await Promise.all([
+        api.projects.get(po.project_id) as Promise<Project>,
+        api.companySettings.get(),
+      ])
+      const blob = await pdf(
+        <PurchaseOrderPDF po={po} project={project} companySettings={companySettings} />
+      ).toBlob()
+      const url = URL.createObjectURL(blob)
+      window.open(url, '_blank')
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to generate PDF")
+    } finally {
+      setIsPrinting(false)
     }
   }
 
@@ -1193,6 +1220,16 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handlePrintPO}
+            disabled={isPrinting}
+            className="gap-2"
+          >
+            {isPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+            {isPrinting ? "Generating..." : "Print PO"}
+          </Button>
           <Button
             variant="outline"
             size="sm"
