@@ -51,11 +51,11 @@ import type { SearchableSelectOption } from "@/components/ui/searchable-select"
 import { api } from "@/api/client"
 import type {
   Quote, QuoteLineItem, QuoteLineItemCreate, QuoteLineItemUpdate,
-  LineItemType, Part, Labor, Miscellaneous, DiscountCode,
+  LineItemType, Part, Labor, Miscellaneous, DiscountCode, CostCode,
   StagedFulfillment, InvoiceCreate, QuoteEditorMode, StagedEdit, StagedAdd,
   StagedLineItemChange, CommitEditsRequest
 } from "@/types"
-import { Plus, Minus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info, Copy, Car, MapPin, X, Lock, GitCommit, Eye, AlertTriangle, Check, CheckCircle2, Printer, Loader2 } from "lucide-react"
+import { Plus, Minus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info, Copy, Car, MapPin, X, Lock, GitCommit, Eye, AlertTriangle, Check, CheckCircle2, Printer, Loader2, Hash } from "lucide-react"
 import { pdf } from '@react-pdf/renderer'
 import { QuotePDF } from '@/components/pdf/QuotePDF'
 import type { CompanySettings, Project } from '@/types'
@@ -168,6 +168,10 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   // Clone quote state
   const [isCloning, setIsCloning] = useState(false)
 
+  // Cost codes
+  const [costCodes, setCostCodes] = useState<CostCode[]>([])
+  const [savingCostCode, setSavingCostCode] = useState(false)
+
   // Print PDF state
   const [isPrinting, setIsPrinting] = useState(false)
 
@@ -263,6 +267,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     fetchQuote()
     fetchResources()
     api.companySettings.get().then(setCompanySettings).catch(() => {})
+    api.costCodes.getAll().then(setCostCodes).catch(() => {})
   }, [quoteId])
 
   // Computed: Are there staged invoicing changes?
@@ -808,6 +813,21 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       alert(err instanceof Error ? err.message : "Failed to update Work Description")
     } finally {
       setSavingWorkDescription(false)
+    }
+  }
+
+  const handleCostCodeChange = async (value: string) => {
+    const costCodeId = parseInt(value)
+    if (isNaN(costCodeId)) return
+    setSavingCostCode(true)
+    try {
+      await api.quotes.update(quoteId, { cost_code_id: costCodeId })
+      fetchQuote()
+      onUpdate?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update cost code")
+    } finally {
+      setSavingCostCode(false)
     }
   }
 
@@ -2626,6 +2646,31 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               A Client PO Number is required before you can create an invoice.
             </p>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Cost Code */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Hash className="h-4 w-4" />
+            Cost Code
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="max-w-md">
+            <SearchableSelect
+              options={costCodes.map(cc => ({ value: cc.id.toString(), label: `${cc.code} - ${cc.description}` }))}
+              value={quote.cost_code_id?.toString()}
+              onChange={handleCostCodeChange}
+              placeholder="Select cost code..."
+              searchPlaceholder="Search cost codes..."
+              disabled={editorMode !== "edit" || savingCostCode}
+            />
+            {savingCostCode && (
+              <p className="text-xs text-muted-foreground mt-1">Saving...</p>
+            )}
+          </div>
         </CardContent>
       </Card>
 

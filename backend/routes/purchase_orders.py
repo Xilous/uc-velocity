@@ -7,7 +7,7 @@ from datetime import datetime
 from database import get_db
 from models import (
     PurchaseOrder, POLineItem, Project, Profile, ProfileType, Part,
-    POReceiving, POReceivingLineItem, POSnapshot, POLineItemSnapshot, POStatus
+    POReceiving, POReceivingLineItem, POSnapshot, POLineItemSnapshot, POStatus, CostCode
 )
 from schemas import (
     PurchaseOrderCreate, PurchaseOrderUpdate, PurchaseOrder as PurchaseOrderSchema,
@@ -278,7 +278,8 @@ def get_all_purchase_orders(skip: int = 0, limit: int = 100, db: Session = Depen
         .options(
             joinedload(PurchaseOrder.vendor),
             joinedload(PurchaseOrder.line_items),
-            joinedload(PurchaseOrder.project)
+            joinedload(PurchaseOrder.project),
+            joinedload(PurchaseOrder.cost_code)
         )
         .offset(skip)
         .limit(limit)
@@ -295,7 +296,8 @@ def get_purchase_order(po_id: int, db: Session = Depends(get_db)):
         .options(
             joinedload(PurchaseOrder.vendor),
             joinedload(PurchaseOrder.line_items).joinedload(POLineItem.part),
-            joinedload(PurchaseOrder.project)
+            joinedload(PurchaseOrder.project),
+            joinedload(PurchaseOrder.cost_code)
         )
         .filter(PurchaseOrder.id == po_id)
         .first()
@@ -323,6 +325,13 @@ def create_purchase_order(po_data: PurchaseOrderCreate, db: Session = Depends(ge
     # Get next sequence number
     next_sequence = get_next_po_sequence(db, po_data.project_id)
 
+    # Resolve cost_code_id: use provided or default to "200-000"
+    cost_code_id = po_data.cost_code_id
+    if cost_code_id is None:
+        default_cc = db.query(CostCode).filter(CostCode.code == "200-000").first()
+        if default_cc:
+            cost_code_id = default_cc.id
+
     db_po = PurchaseOrder(
         project_id=po_data.project_id,
         vendor_id=po_data.vendor_id,
@@ -330,7 +339,8 @@ def create_purchase_order(po_data: PurchaseOrderCreate, db: Session = Depends(ge
         status=po_data.status,
         work_description=po_data.work_description,
         vendor_po_number=po_data.vendor_po_number,
-        expected_delivery_date=po_data.expected_delivery_date
+        expected_delivery_date=po_data.expected_delivery_date,
+        cost_code_id=cost_code_id
     )
     db.add(db_po)
     db.flush()  # Get the PO ID without committing
@@ -342,12 +352,13 @@ def create_purchase_order(po_data: PurchaseOrderCreate, db: Session = Depends(ge
     db.commit()
     db.refresh(db_po)
 
-    # Reload with vendor and project relationship
+    # Reload with vendor, project, and cost_code relationships
     db_po = (
         db.query(PurchaseOrder)
         .options(
             joinedload(PurchaseOrder.vendor),
-            joinedload(PurchaseOrder.project)
+            joinedload(PurchaseOrder.project),
+            joinedload(PurchaseOrder.cost_code)
         )
         .filter(PurchaseOrder.id == db_po.id)
         .first()
@@ -384,6 +395,9 @@ def update_purchase_order(
     if po_data.expected_delivery_date is not None:
         db_po.expected_delivery_date = po_data.expected_delivery_date
 
+    if po_data.cost_code_id is not None:
+        db_po.cost_code_id = po_data.cost_code_id
+
     # Create snapshot if status changed
     if status_changed:
         create_po_snapshot(db, db_po, "status_change", f"Status changed from {old_status.value} to {po_data.status.value}")
@@ -391,12 +405,13 @@ def update_purchase_order(
     db.commit()
     db.refresh(db_po)
 
-    # Reload with vendor and project relationship
+    # Reload with vendor, project, and cost_code relationships
     db_po = (
         db.query(PurchaseOrder)
         .options(
             joinedload(PurchaseOrder.vendor),
-            joinedload(PurchaseOrder.project)
+            joinedload(PurchaseOrder.project),
+            joinedload(PurchaseOrder.cost_code)
         )
         .filter(PurchaseOrder.id == db_po.id)
         .first()
@@ -614,7 +629,8 @@ def commit_po_edits(po_id: int, request: POCommitEditsRequest, db: Session = Dep
             .options(
                 joinedload(PurchaseOrder.vendor),
                 joinedload(PurchaseOrder.line_items).joinedload(POLineItem.part),
-                joinedload(PurchaseOrder.project)
+                joinedload(PurchaseOrder.project),
+                joinedload(PurchaseOrder.cost_code)
             )
             .filter(PurchaseOrder.id == po_id)
             .first()
@@ -764,7 +780,8 @@ def commit_po_edits(po_id: int, request: POCommitEditsRequest, db: Session = Dep
         .options(
             joinedload(PurchaseOrder.vendor),
             joinedload(PurchaseOrder.line_items).joinedload(POLineItem.part),
-            joinedload(PurchaseOrder.project)
+            joinedload(PurchaseOrder.project),
+            joinedload(PurchaseOrder.cost_code)
         )
         .filter(PurchaseOrder.id == po_id)
         .first()
@@ -1266,7 +1283,8 @@ def revert_po_to_version(po_id: int, version: int, db: Session = Depends(get_db)
         .options(
             joinedload(PurchaseOrder.vendor),
             joinedload(PurchaseOrder.line_items).joinedload(POLineItem.part),
-            joinedload(PurchaseOrder.project)
+            joinedload(PurchaseOrder.project),
+            joinedload(PurchaseOrder.cost_code)
         )
         .filter(PurchaseOrder.id == po_id)
         .first()
@@ -1326,7 +1344,8 @@ def clone_purchase_order(po_id: int, db: Session = Depends(get_db)):
         status=POStatus.draft,
         work_description=source_po.work_description,
         vendor_po_number=source_po.vendor_po_number,
-        expected_delivery_date=source_po.expected_delivery_date
+        expected_delivery_date=source_po.expected_delivery_date,
+        cost_code_id=source_po.cost_code_id
     )
     db.add(new_po)
     db.flush()  # Get new PO ID
@@ -1358,7 +1377,8 @@ def clone_purchase_order(po_id: int, db: Session = Depends(get_db)):
         .options(
             joinedload(PurchaseOrder.vendor),
             joinedload(PurchaseOrder.line_items).joinedload(POLineItem.part),
-            joinedload(PurchaseOrder.project)
+            joinedload(PurchaseOrder.project),
+            joinedload(PurchaseOrder.cost_code)
         )
         .filter(PurchaseOrder.id == new_po.id)
         .first()

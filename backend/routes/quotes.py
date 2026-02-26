@@ -6,7 +6,7 @@ from typing import List, Optional
 from database import get_db
 from models import (
     Quote, QuoteLineItem, Project, Labor, Part, Miscellaneous, DiscountCode,
-    QuoteSnapshot, QuoteLineItemSnapshot, Invoice, InvoiceLineItem
+    QuoteSnapshot, QuoteLineItemSnapshot, Invoice, InvoiceLineItem, CostCode
 )
 from datetime import datetime
 
@@ -283,7 +283,8 @@ def get_all_quotes(skip: int = 0, limit: int = 100, db: Session = Depends(get_db
         db.query(Quote)
         .options(
             joinedload(Quote.project),  # Need project for uca_project_number
-            joinedload(Quote.line_items)
+            joinedload(Quote.line_items),
+            joinedload(Quote.cost_code)
         )
         .offset(skip)
         .limit(limit)
@@ -303,7 +304,8 @@ def get_quote(quote_id: int, db: Session = Depends(get_db)):
             joinedload(Quote.line_items).joinedload(QuoteLineItem.labor),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.part),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous),
-            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code)
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code),
+            joinedload(Quote.cost_code)
         )
         .filter(Quote.id == quote_id)
         .first()
@@ -328,11 +330,19 @@ def create_quote(quote_data: QuoteCreate, db: Session = Depends(get_db)):
     # Get next sequence number for this project
     next_sequence = get_next_quote_sequence(db, quote_data.project_id)
 
+    # Resolve cost_code_id: use provided or default to "200-000"
+    cost_code_id = quote_data.cost_code_id
+    if cost_code_id is None:
+        default_cc = db.query(CostCode).filter(CostCode.code == "200-000").first()
+        if default_cc:
+            cost_code_id = default_cc.id
+
     db_quote = Quote(
         project_id=quote_data.project_id,
         quote_sequence=next_sequence,
         client_po_number=quote_data.client_po_number,
-        work_description=quote_data.work_description
+        work_description=quote_data.work_description,
+        cost_code_id=cost_code_id
     )
     db.add(db_quote)
     db.commit()
@@ -359,6 +369,9 @@ def update_quote(quote_id: int, quote_data: QuoteUpdate, db: Session = Depends(g
 
     if quote_data.work_description is not None:
         db_quote.work_description = quote_data.work_description.strip() or None
+
+    if quote_data.cost_code_id is not None:
+        db_quote.cost_code_id = quote_data.cost_code_id
 
     db.commit()
     db.refresh(db_quote)
@@ -416,6 +429,7 @@ def clone_quote(quote_id: int, db: Session = Depends(get_db)):
         work_description=source_quote.work_description,
         markup_control_enabled=False,  # Reset to disabled
         global_markup_percent=None,  # Reset to None
+        cost_code_id=source_quote.cost_code_id,
     )
     db.add(new_quote)
     db.flush()  # Get new quote ID
@@ -451,7 +465,8 @@ def clone_quote(quote_id: int, db: Session = Depends(get_db)):
             joinedload(Quote.line_items).joinedload(QuoteLineItem.labor),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.part),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous),
-            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code)
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code),
+            joinedload(Quote.cost_code)
         )
         .filter(Quote.id == new_quote.id)
         .first()
@@ -1175,7 +1190,8 @@ def commit_edits(
             joinedload(Quote.line_items).joinedload(QuoteLineItem.labor),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.part),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous),
-            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code)
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code),
+            joinedload(Quote.cost_code)
         )
         .filter(Quote.id == quote_id)
         .first()
@@ -1524,7 +1540,8 @@ def revert_to_snapshot(quote_id: int, version: int, db: Session = Depends(get_db
             joinedload(Quote.line_items).joinedload(QuoteLineItem.labor),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.part),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous),
-            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code)
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code),
+            joinedload(Quote.cost_code)
         )
         .filter(Quote.id == quote_id)
         .first()
