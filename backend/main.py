@@ -35,9 +35,11 @@ def ensure_po_columns():
         conn.execute(text("ALTER TABLE po_line_items ADD COLUMN IF NOT EXISTS qty_received INTEGER DEFAULT 0 NOT NULL"))
         conn.execute(text("ALTER TABLE po_line_items ADD COLUMN IF NOT EXISTS actual_unit_price FLOAT"))
         conn.execute(text("ALTER TABLE company_settings ADD COLUMN IF NOT EXISTS hst_rate FLOAT DEFAULT 13.0"))
+        conn.execute(text("ALTER TABLE quotes ALTER COLUMN status SET DEFAULT 'Draft'"))
         conn.commit()
         print("[STARTUP] PO columns ensured")
         print("[STARTUP] HST rate column ensured")
+        print("[STARTUP] Quote status default ensured")
 
     # Step 2: Enum conversion (separate transaction — non-critical)
     # SQLAlchemy's Enum(POStatus) uses member NAMES as PG enum values:
