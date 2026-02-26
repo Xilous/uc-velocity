@@ -23,6 +23,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM
 
 
 # revision identifiers, used by Alembic.
@@ -35,7 +36,10 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Create all baseline tables."""
 
-    # ── Enum types (created separately, then referenced with create_type=False) ──
+    # ── Enum types ──
+    # Use postgresql.ENUM with create_type=False to prevent SQLAlchemy from
+    # auto-creating the type when it processes the table's before_create event.
+    # We create the enums first via raw SQL with duplicate guards.
     conn = op.get_bind()
     conn.execute(sa.text(
         "DO $$ BEGIN CREATE TYPE profiletype AS ENUM ('customer', 'vendor'); "
@@ -45,8 +49,8 @@ def upgrade() -> None:
         "DO $$ BEGIN CREATE TYPE phonetype AS ENUM ('work', 'mobile'); "
         "EXCEPTION WHEN duplicate_object THEN NULL; END $$"
     ))
-    profiletype = sa.Enum('customer', 'vendor', name='profiletype', create_type=False)
-    phonetype = sa.Enum('work', 'mobile', name='phonetype', create_type=False)
+    profiletype = PG_ENUM('customer', 'vendor', name='profiletype', create_type=False)
+    phonetype = PG_ENUM('work', 'mobile', name='phonetype', create_type=False)
 
     # ── categories ──
     op.create_table(
