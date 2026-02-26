@@ -162,20 +162,20 @@ class Part(PartBase):
 # ===== Labor Schemas =====
 class LaborBase(BaseModel):
     description: str
-    hours: int = 1  # Must be a positive whole number
+    hours: float = 1
     rate: float
     markup_percent: float = 0.0
     category_id: Optional[int] = None
 
     @validator('hours', pre=True)
-    def hours_must_be_positive_integer(cls, v) -> int:
-        # Check if value is a whole number before coercion
-        if isinstance(v, float) and not v.is_integer():
-            raise ValueError('Hours must be a positive whole number')
-        v_int = int(v)
-        if v_int <= 0:
-            raise ValueError('Hours must be a positive whole number')
-        return v_int
+    def hours_must_be_positive(cls, v) -> float:
+        v_float = float(v)
+        if v_float <= 0:
+            raise ValueError('Hours must be a positive number')
+        # Enforce max 2 decimal places
+        if round(v_float, 2) != v_float:
+            raise ValueError('Hours cannot have more than 2 decimal places')
+        return round(v_float, 2)
 
 
 class LaborCreate(LaborBase):
@@ -184,22 +184,22 @@ class LaborCreate(LaborBase):
 
 class LaborUpdate(BaseModel):
     description: Optional[str] = None
-    hours: Optional[int] = None  # Must be a positive whole number
+    hours: Optional[float] = None
     rate: Optional[float] = None
     markup_percent: Optional[float] = None
     category_id: Optional[int] = None
 
     @validator('hours', pre=True)
-    def hours_must_be_positive_integer(cls, v) -> Optional[int]:
+    def hours_must_be_positive(cls, v) -> Optional[float]:
         if v is None:
             return None
-        # Check if value is a whole number before coercion
-        if isinstance(v, float) and not v.is_integer():
-            raise ValueError('Hours must be a positive whole number')
-        v_int = int(v)
-        if v_int <= 0:
-            raise ValueError('Hours must be a positive whole number')
-        return v_int
+        v_float = float(v)
+        if v_float <= 0:
+            raise ValueError('Hours must be a positive number')
+        # Enforce max 2 decimal places
+        if round(v_float, 2) != v_float:
+            raise ValueError('Hours cannot have more than 2 decimal places')
+        return round(v_float, 2)
 
 
 class Labor(LaborBase):
