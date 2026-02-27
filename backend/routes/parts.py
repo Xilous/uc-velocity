@@ -3,10 +3,23 @@ from sqlalchemy.orm import Session, joinedload
 from typing import List
 
 from database import get_db
-from models import Part, Labor
+from models import Part, Labor, Profile
 from schemas import PartCreate, PartUpdate, Part as PartSchema, PartWithLabor
 
 router = APIRouter(prefix="/parts", tags=["parts"])
+
+
+def auto_calculate_cost(part: Part, db: Session) -> None:
+    """Auto-calculate cost from list_price and vendor discount when applicable."""
+    if part.list_price is not None and part.vendor_id:
+        vendor = db.query(Profile).filter(Profile.id == part.vendor_id).first()
+        if vendor:
+            effective_discount = (
+                part.discount_percent
+                if part.discount_percent is not None
+                else (vendor.default_discount_percent or 0)
+            )
+            part.cost = part.list_price * (1 - effective_discount / 100)
 
 
 @router.get("/", response_model=List[PartWithLabor])
@@ -14,7 +27,7 @@ def get_all_parts(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)
     """Get all parts with their linked labor items."""
     parts = (
         db.query(Part)
-        .options(joinedload(Part.labor_items))
+        .options(joinedload(Part.labor_items), joinedload(Part.vendor))
         .offset(skip)
         .limit(limit)
         .all()
@@ -27,7 +40,7 @@ def get_part(part_id: int, db: Session = Depends(get_db)):
     """Get a single part by ID with linked labor items."""
     part = (
         db.query(Part)
-        .options(joinedload(Part.labor_items))
+        .options(joinedload(Part.labor_items), joinedload(Part.vendor))
         .filter(Part.id == part_id)
         .first()
     )
@@ -63,13 +76,25 @@ def create_part(part_data: PartCreate, db: Session = Depends(get_db)):
     # Round markup_percent to 2 decimal places
     formatted_markup = round(part_data.markup_percent, 2) if part_data.markup_percent else 0.0
 
+    # Validate vendor if provided
+    if part_data.vendor_id:
+        vendor = db.query(Profile).filter(Profile.id == part_data.vendor_id).first()
+        if not vendor:
+            raise HTTPException(status_code=400, detail="Vendor not found")
+
     db_part = Part(
         part_number=part_data.part_number,
         description=part_data.description,
         cost=part_data.cost,
         markup_percent=formatted_markup,
-        category_id=part_data.category_id
+        category_id=part_data.category_id,
+        vendor_id=part_data.vendor_id,
+        list_price=part_data.list_price,
+        discount_percent=part_data.discount_percent,
     )
+
+    # Auto-calculate cost from list_price + vendor discount
+    auto_calculate_cost(db_part, db)
 
     # Link the labor items
     db_part.labor_items = labor_to_link
@@ -106,6 +131,18 @@ def update_part(part_id: int, part_data: PartUpdate, db: Session = Depends(get_d
         db_part.markup_percent = round(part_data.markup_percent, 2)
     if part_data.category_id is not None:
         db_part.category_id = part_data.category_id
+    if part_data.vendor_id is not None:
+        vendor = db.query(Profile).filter(Profile.id == part_data.vendor_id).first()
+        if not vendor:
+            raise HTTPException(status_code=400, detail="Vendor not found")
+        db_part.vendor_id = part_data.vendor_id
+    if part_data.list_price is not None:
+        db_part.list_price = part_data.list_price
+    if part_data.discount_percent is not None:
+        db_part.discount_percent = part_data.discount_percent
+
+    # Auto-calculate cost from list_price + vendor discount
+    auto_calculate_cost(db_part, db)
 
     # Update labor links if provided
     if part_data.linked_labor_ids is not None:

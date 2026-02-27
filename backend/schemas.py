@@ -137,6 +137,9 @@ class PartBase(BaseModel):
     cost: float
     markup_percent: float = 0.0
     category_id: Optional[int] = None
+    vendor_id: Optional[int] = None
+    list_price: Optional[float] = None
+    discount_percent: Optional[float] = None  # Per-part discount override
 
 
 class PartCreate(PartBase):
@@ -150,6 +153,9 @@ class PartUpdate(BaseModel):
     markup_percent: Optional[float] = None
     category_id: Optional[int] = None
     linked_labor_ids: Optional[List[int]] = None
+    vendor_id: Optional[int] = None
+    list_price: Optional[float] = None
+    discount_percent: Optional[float] = None
 
 
 class Part(PartBase):
@@ -321,6 +327,7 @@ class ProfileBase(BaseModel):
     address: str
     postal_code: str
     website: Optional[str] = None
+    default_discount_percent: Optional[float] = None
 
 
 class ProfileCreate(ProfileBase):
@@ -340,6 +347,7 @@ class ProfileUpdate(BaseModel):
     address: Optional[str] = None
     postal_code: Optional[str] = None
     website: Optional[str] = None
+    default_discount_percent: Optional[float] = None
 
 
 class Profile(ProfileBase):
@@ -395,6 +403,7 @@ class QuoteLineItemBase(BaseModel):
     pms_percent: Optional[float] = None  # Percentage value for PMS % items
     original_markup_percent: Optional[float] = None  # Individual markup before global override
     base_cost: Optional[float] = None  # Base cost used for recalculation
+    markup_percent: Optional[float] = None  # Per-line-item markup (when global OFF)
 
     @validator('quantity', pre=True)
     def quantity_must_be_positive_integer(cls, v) -> int:
@@ -450,7 +459,9 @@ class QuoteBase(BaseModel):
     client_po_number: Optional[str] = None
     work_description: Optional[str] = None
     markup_control_enabled: bool = False  # Markup Discount Control toggle
-    global_markup_percent: Optional[float] = None  # Global markup % when control is enabled
+    parts_markup_percent: Optional[float] = None  # Section-level markup for parts
+    labor_markup_percent: Optional[float] = None  # Section-level markup for labor
+    misc_markup_percent: Optional[float] = None  # Section-level markup for misc
 
 
 class QuoteCreate(BaseModel):
@@ -811,6 +822,7 @@ class QuoteLineItemSnapshotBase(BaseModel):
     pms_percent: Optional[float] = None  # Percentage value for PMS % items
     original_markup_percent: Optional[float] = None  # Individual markup before global override
     base_cost: Optional[float] = None  # Base cost used for recalculation
+    markup_percent: Optional[float] = None  # Per-line-item markup
 
     @validator('quantity', 'qty_pending', 'qty_fulfilled', pre=True)
     def quantities_must_be_whole_numbers(cls, v) -> int:
@@ -856,7 +868,9 @@ class RevertPreview(BaseModel):
 # ===== Markup Control Toggle Schemas =====
 class MarkupControlToggleRequest(BaseModel):
     enabled: bool
-    global_markup_percent: Optional[float] = None  # Required when enabled=True
+    parts_markup_percent: Optional[float] = None  # Required when enabled=True
+    labor_markup_percent: Optional[float] = None
+    misc_markup_percent: Optional[float] = None
 
 
 class MarkupControlToggleResponse(BaseModel):
@@ -881,6 +895,7 @@ class StagedLineItemChange(BaseModel):
     unit_price: Optional[float] = None
     is_pms: bool = False
     pms_percent: Optional[float] = None
+    markup_percent: Optional[float] = None  # Per-line-item markup
 
     @validator('quantity', pre=True)
     def quantity_must_be_positive_integer(cls, v) -> Optional[int]:
@@ -907,3 +922,10 @@ class CommitEditsResponse(BaseModel):
     message: str
     quote: Quote
     snapshot_version: int
+
+
+# ===== Vendor Pricebook Import Schemas =====
+class PricebookImportResult(BaseModel):
+    created: int
+    updated: int
+    errors: List[str] = []

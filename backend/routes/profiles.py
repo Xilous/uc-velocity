@@ -50,7 +50,8 @@ def create_profile(profile_data: ProfileCreate, db: Session = Depends(get_db)):
         pst=profile_data.pst,
         address=profile_data.address,
         postal_code=profile_data.postal_code,
-        website=profile_data.website
+        website=profile_data.website,
+        default_discount_percent=getattr(profile_data, 'default_discount_percent', None)
     )
     db.add(db_profile)
     db.flush()  # Get the profile ID
@@ -100,6 +101,8 @@ def update_profile(profile_id: int, profile_data: ProfileUpdate, db: Session = D
         db_profile.postal_code = profile_data.postal_code
     if profile_data.website is not None:
         db_profile.website = profile_data.website
+    if profile_data.default_discount_percent is not None:
+        db_profile.default_discount_percent = profile_data.default_discount_percent
 
     db.commit()
     db.refresh(db_profile)

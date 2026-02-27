@@ -80,7 +80,8 @@ def create_snapshot(
             is_pms=item.is_pms,
             pms_percent=item.pms_percent,
             original_markup_percent=item.original_markup_percent,
-            base_cost=item.base_cost
+            base_cost=item.base_cost,
+            markup_percent=item.markup_percent
         )
         db.add(item_snapshot)
 
@@ -428,7 +429,9 @@ def clone_quote(quote_id: int, db: Session = Depends(get_db)):
         client_po_number=source_quote.client_po_number,
         work_description=source_quote.work_description,
         markup_control_enabled=False,  # Reset to disabled
-        global_markup_percent=None,  # Reset to None
+        parts_markup_percent=None,
+        labor_markup_percent=None,
+        misc_markup_percent=None,
         cost_code_id=source_quote.cost_code_id,
     )
     db.add(new_quote)
@@ -478,6 +481,28 @@ def clone_quote(quote_id: int, db: Session = Depends(get_db)):
 
 # ==================== Markup Discount Control ====================
 
+def _get_section_markup(item_type: str, request: MarkupControlToggleRequest) -> float:
+    """Get the appropriate section-level markup % for a line item type."""
+    if item_type == "part":
+        return request.parts_markup_percent or 0
+    elif item_type == "labor":
+        return request.labor_markup_percent or 0
+    elif item_type == "misc":
+        return request.misc_markup_percent or 0
+    return 0
+
+
+def _get_section_markup_from_quote(item_type: str, quote: Quote) -> float:
+    """Get the appropriate section-level markup % from a quote's stored values."""
+    if item_type == "part":
+        return quote.parts_markup_percent or 0
+    elif item_type == "labor":
+        return quote.labor_markup_percent or 0
+    elif item_type == "misc":
+        return quote.misc_markup_percent or 0
+    return 0
+
+
 @router.post("/{quote_id}/markup-control", response_model=MarkupControlToggleResponse)
 def toggle_markup_control(
     quote_id: int,
@@ -489,9 +514,10 @@ def toggle_markup_control(
 
     When enabling (request.enabled=True):
     - Validates no discount codes are applied to any line items
-    - Requires global_markup_percent to be provided
+    - Requires section-level markup percentages (parts/labor/misc)
     - Stores original markups and base costs for each line item
-    - Recalculates all unit_prices using the global markup
+    - Recalculates all unit_prices using the section-appropriate markup
+    - Stores markup_percent on each line item
     - PMS items are EXEMPT and not recalculated
 
     When disabling (request.enabled=False):
@@ -511,33 +537,48 @@ def toggle_markup_control(
     check_quote_not_frozen(quote_id, db)
 
     if request.enabled:
-        if request.global_markup_percent is None:
+        if request.parts_markup_percent is None and request.labor_markup_percent is None and request.misc_markup_percent is None:
             raise HTTPException(
                 status_code=400,
-                detail="global_markup_percent is required when enabling or updating markup control"
+                detail="At least one section markup percentage is required when enabling markup control"
             )
 
         if quote.markup_control_enabled:
-            # UPDATE MODE: Already enabled, just update the percent
-            old_percent = quote.global_markup_percent
-            quote.global_markup_percent = request.global_markup_percent
+            # UPDATE MODE: Already enabled, just update the percents
+            old_parts = quote.parts_markup_percent
+            old_labor = quote.labor_markup_percent
+            old_misc = quote.misc_markup_percent
+
+            quote.parts_markup_percent = request.parts_markup_percent if request.parts_markup_percent is not None else quote.parts_markup_percent
+            quote.labor_markup_percent = request.labor_markup_percent if request.labor_markup_percent is not None else quote.labor_markup_percent
+            quote.misc_markup_percent = request.misc_markup_percent if request.misc_markup_percent is not None else quote.misc_markup_percent
 
             # Recalculate using EXISTING base_cost (don't recalculate base_cost)
             for item in quote.line_items:
                 if item.is_pms:
                     continue  # Skip PMS items - they are EXEMPT
+                section_markup = _get_section_markup_from_quote(item.item_type, quote)
+                item.markup_percent = section_markup
                 if item.base_cost is not None:
-                    item.unit_price = item.base_cost * (1 + request.global_markup_percent / 100)
+                    item.unit_price = item.base_cost * (1 + section_markup / 100)
 
             # Create snapshot
+            desc_parts = []
+            if request.parts_markup_percent is not None and request.parts_markup_percent != old_parts:
+                desc_parts.append(f"Parts: {old_parts}% -> {request.parts_markup_percent}%")
+            if request.labor_markup_percent is not None and request.labor_markup_percent != old_labor:
+                desc_parts.append(f"Labour: {old_labor}% -> {request.labor_markup_percent}%")
+            if request.misc_markup_percent is not None and request.misc_markup_percent != old_misc:
+                desc_parts.append(f"Misc: {old_misc}% -> {request.misc_markup_percent}%")
+
             create_snapshot(
                 db=db,
                 quote=quote,
                 action_type="edit",
-                action_description=f"Updated global markup from {old_percent}% to {request.global_markup_percent}%"
+                action_description=f"Updated section markup ({', '.join(desc_parts) if desc_parts else 'no change'})"
             )
 
-            message = f"Global markup updated to {request.global_markup_percent}%"
+            message = f"Section markup updated (Parts: {quote.parts_markup_percent}%, Labour: {quote.labor_markup_percent}%, Misc: {quote.misc_markup_percent}%)"
 
         else:
             # ENABLE MODE: First time enabling
@@ -552,9 +593,11 @@ def toggle_markup_control(
                     detail="Remove discount codes first to enable this feature"
                 )
 
-            # Enable markup control
+            # Enable markup control with section-level percents
             quote.markup_control_enabled = True
-            quote.global_markup_percent = request.global_markup_percent
+            quote.parts_markup_percent = request.parts_markup_percent or 0
+            quote.labor_markup_percent = request.labor_markup_percent or 0
+            quote.misc_markup_percent = request.misc_markup_percent or 0
 
             # Recalculate all line items
             for item in quote.line_items:
@@ -565,24 +608,30 @@ def toggle_markup_control(
                 item.original_markup_percent = get_original_markup(item, db)
                 item.base_cost = calculate_base_cost(item, db)
 
-                # Recalculate unit_price with global markup
+                # Apply section-appropriate markup
+                section_markup = _get_section_markup_from_quote(item.item_type, quote)
+                item.markup_percent = section_markup
+
+                # Recalculate unit_price with section markup
                 if item.base_cost:
-                    item.unit_price = item.base_cost * (1 + request.global_markup_percent / 100)
+                    item.unit_price = item.base_cost * (1 + section_markup / 100)
 
             # Create snapshot
             create_snapshot(
                 db=db,
                 quote=quote,
                 action_type="edit",
-                action_description=f"Enabled Markup Discount Control ({request.global_markup_percent}%)"
+                action_description=f"Enabled Markup Control (Parts: {quote.parts_markup_percent}%, Labour: {quote.labor_markup_percent}%, Misc: {quote.misc_markup_percent}%)"
             )
 
-            message = f"Markup Discount Control enabled with {request.global_markup_percent}% markup"
+            message = f"Markup Control enabled (Parts: {quote.parts_markup_percent}%, Labour: {quote.labor_markup_percent}%, Misc: {quote.misc_markup_percent}%)"
 
     else:
         # Disable markup control
         quote.markup_control_enabled = False
-        quote.global_markup_percent = None
+        quote.parts_markup_percent = None
+        quote.labor_markup_percent = None
+        quote.misc_markup_percent = None
 
         # Restore original markups
         for item in quote.line_items:
@@ -592,16 +641,17 @@ def toggle_markup_control(
             # Restore unit_price using original markup
             if item.base_cost is not None and item.original_markup_percent is not None:
                 item.unit_price = item.base_cost * (1 + item.original_markup_percent / 100)
+            item.markup_percent = None
 
         # Create snapshot
         create_snapshot(
             db=db,
             quote=quote,
             action_type="edit",
-            action_description="Disabled Markup Discount Control (restored individual markups)"
+            action_description="Disabled Markup Control (restored individual markups)"
         )
 
-        message = "Markup Discount Control disabled, original markups restored"
+        message = "Markup Control disabled, original markups restored"
 
     db.commit()
 
@@ -732,12 +782,14 @@ def add_quote_line(quote_id: int, line_data: QuoteLineItemCreate, db: Session = 
     db.add(db_line)
     db.flush()  # Need ID for calculate_base_cost
 
-    # If markup control is enabled, apply global markup to new items
+    # If markup control is enabled, apply section markup to new items
     if quote.markup_control_enabled and not line_data.is_pms:
         db_line.original_markup_percent = get_original_markup(db_line, db)
         db_line.base_cost = calculate_base_cost(db_line, db)
-        if db_line.base_cost and quote.global_markup_percent is not None:
-            db_line.unit_price = db_line.base_cost * (1 + quote.global_markup_percent / 100)
+        section_markup = _get_section_markup_from_quote(db_line.item_type, quote)
+        db_line.markup_percent = section_markup
+        if db_line.base_cost:
+            db_line.unit_price = db_line.base_cost * (1 + section_markup / 100)
 
     # Create snapshot after adding line item
     item_desc = get_line_item_description(db_line, db)
@@ -923,7 +975,8 @@ def delete_quote_line(quote_id: int, line_id: int, db: Session = Depends(get_db)
             is_pms=item.is_pms,
             pms_percent=item.pms_percent,
             original_markup_percent=item.original_markup_percent,
-            base_cost=item.base_cost
+            base_cost=item.base_cost,
+            markup_percent=item.markup_percent
         )
         db.add(item_snapshot)
 
@@ -1049,12 +1102,20 @@ def commit_edits(
             db.add(new_item)
             db.flush()
 
-            # Apply markup control if enabled
-            if quote.markup_control_enabled and not change.is_pms:
-                new_item.original_markup_percent = get_original_markup(new_item, db)
+            # Compute and store base_cost and markup_percent
+            if not change.is_pms:
                 new_item.base_cost = calculate_base_cost(new_item, db)
-                if new_item.base_cost and quote.global_markup_percent is not None:
-                    new_item.unit_price = new_item.base_cost * (1 + quote.global_markup_percent / 100)
+                new_item.original_markup_percent = get_original_markup(new_item, db)
+
+                if quote.markup_control_enabled:
+                    # Use section-level markup
+                    section_markup = _get_section_markup_from_quote(new_item.item_type, quote)
+                    new_item.markup_percent = section_markup
+                    if new_item.base_cost:
+                        new_item.unit_price = new_item.base_cost * (1 + section_markup / 100)
+                else:
+                    # Use the inventory item's markup_percent
+                    new_item.markup_percent = new_item.original_markup_percent
 
             item_desc = get_line_item_description(new_item, db)
             change_descriptions.append(f"Added {item_desc} (qty: {quantity})")
@@ -1124,6 +1185,21 @@ def commit_edits(
             if change.description is not None and change.description != line_item.description:
                 item_changes.append("updated description")
                 line_item.description = change.description
+
+            # Update markup_percent if provided (only when global toggle is OFF)
+            if change.markup_percent is not None and change.markup_percent != line_item.markup_percent:
+                if quote.markup_control_enabled:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Cannot change per-item markup while Markup Control is enabled"
+                    )
+                item_changes.append(f"markup: {line_item.markup_percent or 0:.1f}% -> {change.markup_percent:.1f}%")
+                line_item.markup_percent = change.markup_percent
+                # Recalculate unit_price from base_cost
+                if line_item.base_cost is None:
+                    line_item.base_cost = calculate_base_cost(line_item, db)
+                if line_item.base_cost:
+                    line_item.unit_price = line_item.base_cost * (1 + change.markup_percent / 100)
 
             if item_changes:
                 change_descriptions.append(f"{item_desc}: {', '.join(item_changes)}")
@@ -1526,7 +1602,8 @@ def revert_to_snapshot(quote_id: int, version: int, db: Session = Depends(get_db
             is_pms=item.is_pms,
             pms_percent=item.pms_percent,
             original_markup_percent=item.original_markup_percent,
-            base_cost=item.base_cost
+            base_cost=item.base_cost,
+            markup_percent=item.markup_percent
         )
         db.add(item_snapshot)
 
