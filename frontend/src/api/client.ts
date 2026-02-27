@@ -15,7 +15,7 @@ import type {
   MarkupControlToggleRequest, MarkupControlToggleResponse,
   CommitEditsRequest, CommitEditsResponse,
   CompanySettings, CompanySettingsUpdate, InvoiceSummaryItem,
-  BacklogQuoteItem
+  BacklogQuoteItem, PricebookImportResult
 } from '@/types';
 
 // API base URL - configurable via environment variable for production
@@ -279,5 +279,29 @@ export const api = {
   // ===== Reports =====
   reports: {
     getBacklogQuotes: () => request<BacklogQuoteItem[]>('/reports/backlog-quotes'),
+  },
+
+  // ===== Vendor Pricebook =====
+  vendorPricebook: {
+    import: async (vendorId: number, file: File): Promise<PricebookImportResult> => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await fetch(`${API_BASE}/vendors/${vendorId}/pricebook/import`, {
+        method: 'POST',
+        body: formData,
+        // Note: do NOT set Content-Type header — browser sets multipart boundary automatically
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        let message = `API error: ${response.status}`;
+        if (typeof error.detail === 'string') {
+          message = error.detail;
+        } else if (Array.isArray(error.detail)) {
+          message = error.detail.map((e: any) => e.msg).join('; ');
+        }
+        throw new Error(message);
+      }
+      return response.json();
+    },
   },
 };

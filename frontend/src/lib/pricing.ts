@@ -3,9 +3,24 @@ import type { QuoteLineItem } from '@/types'
 /**
  * Get the unit price for a quote line item, resolving from the linked
  * inventory item (with markup) if no explicit override is set.
+ *
+ * Priority:
+ * 1. Explicit unit_price override (set by markup control calculation)
+ * 2. Line-item markup_percent with base cost (per-item markup)
+ * 3. Inventory item's markup (legacy / no line-item markup set)
  */
 export function getLineItemUnitPrice(item: QuoteLineItem): number {
+  // If explicit unit_price override exists (from markup calculation), use it
   if (item.unit_price) return item.unit_price
+
+  // If line-item markup_percent is set, use it with base cost
+  if (item.markup_percent != null) {
+    if (item.part) return item.part.cost * (1 + item.markup_percent / 100)
+    if (item.labor) return item.labor.hours * item.labor.rate * (1 + item.markup_percent / 100)
+    if (item.miscellaneous) return item.miscellaneous.unit_price * (1 + item.markup_percent / 100)
+  }
+
+  // Fall back to inventory item's markup (legacy / no line-item markup set)
   if (item.labor) {
     return item.labor.hours * item.labor.rate * (1 + item.labor.markup_percent / 100)
   }

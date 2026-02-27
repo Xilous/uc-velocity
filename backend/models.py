@@ -53,6 +53,7 @@ class Profile(Base):
     address = Column(String, nullable=False)
     postal_code = Column(String, nullable=False)
     website = Column(String, nullable=True)  # Optional URL to official website
+    default_discount_percent = Column(Float, nullable=True)  # Default vendor discount %
 
     # Relationships
     contacts = relationship("Contact", back_populates="profile", cascade="all, delete-orphan")
@@ -95,10 +96,14 @@ class Part(Base):
     cost = Column(Float, nullable=False)
     markup_percent = Column(Float, default=0.0)
     category_id = Column(Integer, ForeignKey('categories.id'))
+    vendor_id = Column(Integer, ForeignKey('profiles.id'), nullable=True)
+    list_price = Column(Float, nullable=True)
+    discount_percent = Column(Float, nullable=True)  # Per-part discount override (nullable)
 
     # Relationships
     category = relationship("Category", back_populates="parts")
     labor_items = relationship("Labor", secondary=part_labor_link, back_populates="parts")
+    vendor = relationship("Profile")
 
 
 class Labor(Base):
@@ -182,7 +187,9 @@ class Quote(Base):
     client_po_number = Column(String, nullable=True)  # Client's PO number (required for invoicing)
     work_description = Column(String, nullable=True)  # Optional work description
     markup_control_enabled = Column(Boolean, default=False)  # Markup Discount Control toggle
-    global_markup_percent = Column(Float, nullable=True)  # Global markup % when control is enabled
+    parts_markup_percent = Column(Float, nullable=True)  # Section-level markup for parts
+    labor_markup_percent = Column(Float, nullable=True)  # Section-level markup for labor
+    misc_markup_percent = Column(Float, nullable=True)  # Section-level markup for misc
     cost_code_id = Column(Integer, ForeignKey('cost_codes.id'), nullable=False)
 
     # Relationships
@@ -212,6 +219,7 @@ class QuoteLineItem(Base):
     pms_percent = Column(Float, nullable=True)  # Percentage value for PMS % items (null for PMS $ or non-PMS)
     original_markup_percent = Column(Float, nullable=True)  # Individual markup before global override
     base_cost = Column(Float, nullable=True)  # Base cost used for recalculation
+    markup_percent = Column(Float, nullable=True)  # Per-line-item markup (when global OFF)
 
     # Relationships
     quote = relationship("Quote", back_populates="line_items")
@@ -438,6 +446,7 @@ class QuoteLineItemSnapshot(Base):
     pms_percent = Column(Float, nullable=True)  # Percentage value for PMS % items
     original_markup_percent = Column(Float, nullable=True)  # Individual markup before global override
     base_cost = Column(Float, nullable=True)  # Base cost used for recalculation
+    markup_percent = Column(Float, nullable=True)  # Per-line-item markup
 
     # Relationships
     snapshot = relationship("QuoteSnapshot", back_populates="line_item_states")

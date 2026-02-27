@@ -53,6 +53,7 @@ export function ProfileForm({ profile, defaultType = "customer", onSuccess, onCa
   const [address, setAddress] = useState("")
   const [postalCode, setPostalCode] = useState("")
   const [website, setWebsite] = useState("")
+  const [defaultDiscountPercent, setDefaultDiscountPercent] = useState("")
 
   // Contacts state
   const [contacts, setContacts] = useState<ContactFormData[]>([])
@@ -80,6 +81,7 @@ export function ProfileForm({ profile, defaultType = "customer", onSuccess, onCa
       setAddress(profile.address)
       setPostalCode(profile.postal_code)
       setWebsite(profile.website || "")
+      setDefaultDiscountPercent(profile.default_discount_percent?.toString() || "")
       setContacts(profile.contacts.map(c => ({
         id: c.id,
         tempId: `existing-${c.id}`,
@@ -181,7 +183,8 @@ export function ProfileForm({ profile, defaultType = "customer", onSuccess, onCa
           pst: pst.trim(),
           address: address.trim(),
           postal_code: postalCode.trim(),
-          website: website.trim() || undefined
+          website: website.trim() || undefined,
+          default_discount_percent: defaultDiscountPercent ? parseFloat(defaultDiscountPercent) : undefined,
         })
 
         // Sync contacts: delete removed, update existing, add new
@@ -222,6 +225,7 @@ export function ProfileForm({ profile, defaultType = "customer", onSuccess, onCa
           address: address.trim(),
           postal_code: postalCode.trim(),
           website: website.trim() || undefined,
+          default_discount_percent: defaultDiscountPercent ? parseFloat(defaultDiscountPercent) : undefined,
           contacts: contacts.map(buildContactCreate)
         }
         await api.profiles.create(profileData)
@@ -316,6 +320,26 @@ export function ProfileForm({ profile, defaultType = "customer", onSuccess, onCa
             placeholder="e.g., https://www.example.com"
           />
         </div>
+
+        {/* Default Discount — only for vendors */}
+        {type === "vendor" && (
+          <div className="space-y-2">
+            <Label htmlFor="defaultDiscount">Default Discount (%)</Label>
+            <Input
+              id="defaultDiscount"
+              type="number"
+              step="0.01"
+              min="0"
+              max="100"
+              value={defaultDiscountPercent}
+              onChange={(e) => setDefaultDiscountPercent(e.target.value)}
+              placeholder="0"
+            />
+            <p className="text-xs text-muted-foreground">
+              Applied to all parts from this vendor unless overridden per-part.
+            </p>
+          </div>
+        )}
       </div>
 
       <Separator />

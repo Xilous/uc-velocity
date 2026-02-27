@@ -19,9 +19,10 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { ProfileForm } from "@/components/forms/ProfileForm"
+import { Input } from "@/components/ui/input"
 import { api } from "@/api/client"
-import type { Profile } from "@/types"
-import { Plus, Trash2, Pencil, Users, Building, ExternalLink, Phone, Mail, MapPin } from "lucide-react"
+import type { Profile, Part, PricebookImportResult } from "@/types"
+import { Plus, Trash2, Pencil, Users, Building, ExternalLink, Phone, Mail, MapPin, Upload } from "lucide-react"
 
 export function ProfilesPage() {
   const [profiles, setProfiles] = useState<Profile[]>([])
@@ -30,6 +31,12 @@ export function ProfilesPage() {
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [editingProfile, setEditingProfile] = useState<Profile | null>(null)
   const [viewingProfile, setViewingProfile] = useState<Profile | null>(null)
+
+  // Pricebook state
+  const [vendorParts, setVendorParts] = useState<Part[]>([])
+  const [loadingParts, setLoadingParts] = useState(false)
+  const [importingPricebook, setImportingPricebook] = useState(false)
+  const [importResult, setImportResult] = useState<PricebookImportResult | null>(null)
 
   const fetchData = async () => {
     setLoading(true)
@@ -47,6 +54,37 @@ export function ProfilesPage() {
   useEffect(() => {
     fetchData()
   }, [])
+
+  // Fetch parts linked to this vendor when viewing a vendor
+  useEffect(() => {
+    if (viewingProfile?.type === "vendor") {
+      setLoadingParts(true)
+      setImportResult(null)
+      api.parts.getAll()
+        .then(allParts => setVendorParts(allParts.filter(p => p.vendor_id === viewingProfile.id)))
+        .catch(() => setVendorParts([]))
+        .finally(() => setLoadingParts(false))
+    } else {
+      setVendorParts([])
+    }
+  }, [viewingProfile])
+
+  const handlePricebookImport = async (file: File) => {
+    if (!viewingProfile) return
+    setImportingPricebook(true)
+    setImportResult(null)
+    try {
+      const result = await api.vendorPricebook.import(viewingProfile.id, file)
+      setImportResult(result)
+      // Refresh vendor parts list
+      const allParts = await api.parts.getAll()
+      setVendorParts(allParts.filter(p => p.vendor_id === viewingProfile.id))
+    } catch (err) {
+      setImportResult({ created: 0, updated: 0, errors: [err instanceof Error ? err.message : "Import failed"] })
+    } finally {
+      setImportingPricebook(false)
+    }
+  }
 
   const handleDelete = async (e: React.MouseEvent, id: number) => {
     e.stopPropagation() // Prevent row click
@@ -333,6 +371,104 @@ export function ProfilesPage() {
                   ))}
                 </div>
               </div>
+
+              {/* Vendor Pricebook (vendors only) */}
+              {viewingProfile.type === "vendor" && (
+                <>
+                  <Separator />
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">
+                        Pricebook ({vendorParts.length} parts)
+                      </h3>
+                      <div className="relative">
+                        <Input
+                          type="file"
+                          accept=".csv"
+                          className="absolute inset-0 opacity-0 cursor-pointer"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0]
+                            if (file) handlePricebookImport(file)
+                            e.target.value = "" // Reset so same file can be re-imported
+                          }}
+                          disabled={importingPricebook}
+                        />
+                        <Button variant="outline" size="sm" disabled={importingPricebook}>
+                          <Upload className="h-4 w-4 mr-1" />
+                          {importingPricebook ? "Importing..." : "Import CSV"}
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Import results */}
+                    {importResult && (
+                      <div className={`text-sm p-3 rounded-md border ${importResult.errors.length > 0 ? "bg-amber-50 dark:bg-amber-950 border-amber-200 dark:border-amber-800" : "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800"}`}>
+                        <p>
+                          Created: <strong>{importResult.created}</strong> | Updated: <strong>{importResult.updated}</strong>
+                        </p>
+                        {importResult.errors.length > 0 && (
+                          <div className="mt-1 text-amber-700 dark:text-amber-300">
+                            {importResult.errors.map((err, i) => (
+                              <p key={i} className="text-xs">{err}</p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Parts table */}
+                    {loadingParts ? (
+                      <p className="text-sm text-muted-foreground">Loading parts...</p>
+                    ) : vendorParts.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No parts linked to this vendor. Import a CSV pricebook to get started.
+                      </p>
+                    ) : (
+                      <div className="bg-card rounded-lg border">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Part Number</TableHead>
+                              <TableHead>Description</TableHead>
+                              <TableHead className="text-right">List Price</TableHead>
+                              <TableHead className="text-right">Discount %</TableHead>
+                              <TableHead className="text-right">Cost</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {vendorParts.map(part => (
+                              <TableRow key={part.id}>
+                                <TableCell className="font-medium">{part.part_number}</TableCell>
+                                <TableCell className="text-muted-foreground">{part.description}</TableCell>
+                                <TableCell className="text-right">
+                                  {part.list_price != null ? `$${part.list_price.toFixed(2)}` : "—"}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {part.discount_percent != null
+                                    ? `${part.discount_percent}%`
+                                    : viewingProfile.default_discount_percent
+                                      ? <span className="text-muted-foreground">{viewingProfile.default_discount_percent}% (default)</span>
+                                      : "—"}
+                                </TableCell>
+                                <TableCell className="text-right font-medium">
+                                  ${part.cost.toFixed(2)}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* Default Discount display for vendors */}
+              {viewingProfile.type === "vendor" && viewingProfile.default_discount_percent != null && (
+                <div className="text-sm text-muted-foreground">
+                  Default Vendor Discount: <strong>{viewingProfile.default_discount_percent}%</strong>
+                </div>
+              )}
 
               {/* Close button */}
               <div className="flex justify-end pt-4">

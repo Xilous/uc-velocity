@@ -110,6 +110,9 @@ export interface Part {
   markup_percent: number;
   category_id?: number;
   labor_items?: Labor[];  // Linked labor items
+  vendor_id?: number;
+  list_price?: number;
+  discount_percent?: number;  // Per-part discount override
 }
 
 export interface PartCreate {
@@ -119,6 +122,9 @@ export interface PartCreate {
   markup_percent?: number;
   category_id?: number;
   linked_labor_ids?: number[];
+  vendor_id?: number;
+  list_price?: number;
+  discount_percent?: number;
 }
 
 // ===== Miscellaneous =====
@@ -201,6 +207,7 @@ export interface Profile {
   address: string;
   postal_code: string;
   website?: string;
+  default_discount_percent?: number;
   contacts: Contact[];
 }
 
@@ -211,6 +218,7 @@ export interface ProfileCreate {
   address: string;
   postal_code: string;
   website?: string;
+  default_discount_percent?: number;
   contacts: ContactCreate[];
 }
 
@@ -221,6 +229,7 @@ export interface ProfileUpdate {
   address?: string;
   postal_code?: string;
   website?: string;
+  default_discount_percent?: number;
 }
 
 // ===== Projects =====
@@ -277,6 +286,7 @@ export interface QuoteLineItem {
   pms_percent?: number;  // Percentage value for PMS % items
   original_markup_percent?: number;  // Individual markup before global override
   base_cost?: number;  // Base cost used for recalculation
+  markup_percent?: number;  // Per-line-item markup
   labor?: Labor;
   part?: Part;
   miscellaneous?: Miscellaneous;
@@ -319,7 +329,9 @@ export interface Quote {
   client_po_number?: string | null;
   work_description?: string | null;
   markup_control_enabled: boolean;  // Markup Discount Control toggle
-  global_markup_percent?: number | null;  // Global markup % when control is enabled
+  parts_markup_percent?: number | null;  // Section-level markup for parts
+  labor_markup_percent?: number | null;  // Section-level markup for labor
+  misc_markup_percent?: number | null;  // Section-level markup for misc
   cost_code_id?: number | null;
   cost_code?: CostCode | null;
   line_items: QuoteLineItem[];
@@ -592,6 +604,14 @@ export interface QuoteLineItemSnapshot {
   pms_percent?: number;  // Percentage value for PMS % items
   original_markup_percent?: number;  // Individual markup before global override
   base_cost?: number;  // Base cost used for recalculation
+  markup_percent?: number;  // Per-line-item markup
+}
+
+// ===== Pricebook Import =====
+export interface PricebookImportResult {
+  created: number;
+  updated: number;
+  errors: string[];
 }
 
 // ===== Quote Snapshots =====
@@ -624,7 +644,9 @@ export interface StagedFulfillment {
 // ===== Markup Control Toggle =====
 export interface MarkupControlToggleRequest {
   enabled: boolean;
-  global_markup_percent?: number;
+  parts_markup_percent?: number;
+  labor_markup_percent?: number;
+  misc_markup_percent?: number;
 }
 
 export interface MarkupControlToggleResponse {
@@ -650,6 +672,7 @@ export interface StagedLineItemChange {
   unit_price?: number;
   is_pms?: boolean;
   pms_percent?: number;
+  markup_percent?: number;  // Per-line-item markup
 }
 
 export interface CommitEditsRequest {
@@ -677,6 +700,7 @@ export interface StagedEdit {
   unit_price?: number;
   discount_code_id?: number | null;  // null means "remove discount"
   description?: string;
+  markup_percent?: number;
 }
 
 /**

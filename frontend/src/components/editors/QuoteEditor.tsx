@@ -149,14 +149,18 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   const [pmsType, setPmsType] = useState<"percent" | "dollar">("dollar")
   const [pmsValue, setPmsValue] = useState("")
 
-  // Markup Discount Control states
+  // Markup Discount Control states (section-level)
   const [markupControlDialogOpen, setMarkupControlDialogOpen] = useState(false)
-  const [pendingMarkupPercent, setPendingMarkupPercent] = useState("")
+  const [pendingPartsMarkup, setPendingPartsMarkup] = useState("")
+  const [pendingLaborMarkup, setPendingLaborMarkup] = useState("")
+  const [pendingMiscMarkup, setPendingMiscMarkup] = useState("")
   const [togglingMarkupControl, setTogglingMarkupControl] = useState(false)
 
   // Edit Markup states (for modifying markup while enabled)
   const [editMarkupDialogOpen, setEditMarkupDialogOpen] = useState(false)
-  const [editingMarkupPercent, setEditingMarkupPercent] = useState("")
+  const [editingPartsMarkup, setEditingPartsMarkup] = useState("")
+  const [editingLaborMarkup, setEditingLaborMarkup] = useState("")
+  const [editingMiscMarkup, setEditingMiscMarkup] = useState("")
   const [updatingMarkupPercent, setUpdatingMarkupPercent] = useState(false)
 
   // Discount All dialog state
@@ -656,7 +660,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       (staged.quantity === undefined || staged.quantity === item.quantity) &&
       (staged.unit_price === undefined || staged.unit_price === item.unit_price) &&
       (staged.discount_code_id === undefined || staged.discount_code_id === item.discount_code_id) &&
-      (staged.description === undefined || staged.description === item.description)
+      (staged.description === undefined || staged.description === item.description) &&
+      (staged.markup_percent === undefined || staged.markup_percent === item.markup_percent)
 
     if (isUnchanged) {
       newStagedEdits.delete(item.id)
@@ -744,6 +749,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
           unit_price: edit.unit_price,
           discount_code_id: edit.discount_code_id === null ? 0 : edit.discount_code_id,
           description: edit.description,
+          markup_percent: edit.markup_percent,
         })
       }
 
@@ -842,12 +848,14 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         alert("Remove discount codes first to enable this feature")
         return
       }
-      // Open dialog to get global markup percent
-      setPendingMarkupPercent("")
+      // Open dialog to get section markup percents
+      setPendingPartsMarkup("")
+      setPendingLaborMarkup("")
+      setPendingMiscMarkup("")
       setMarkupControlDialogOpen(true)
     } else {
       // Disabling - confirm and call API
-      if (!confirm("Disable Markup Discount Control? This will restore individual markups.")) {
+      if (!confirm("Disable Markup Control? This will restore individual markups.")) {
         return
       }
       handleDisableMarkupControl()
@@ -868,9 +876,12 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   }
 
   const handleConfirmEnableMarkupControl = async () => {
-    const percent = parseFloat(pendingMarkupPercent)
-    if (isNaN(percent) || percent < 0) {
-      alert("Please enter a valid markup percentage (0 or greater)")
+    const partsP = parseFloat(pendingPartsMarkup) || 0
+    const laborP = parseFloat(pendingLaborMarkup) || 0
+    const miscP = parseFloat(pendingMiscMarkup) || 0
+
+    if (partsP < 0 || laborP < 0 || miscP < 0) {
+      alert("Markup percentages must be 0 or greater")
       return
     }
 
@@ -878,10 +889,14 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     try {
       await api.quotes.toggleMarkupControl(quoteId, {
         enabled: true,
-        global_markup_percent: percent
+        parts_markup_percent: partsP,
+        labor_markup_percent: laborP,
+        misc_markup_percent: miscP,
       })
       setMarkupControlDialogOpen(false)
-      setPendingMarkupPercent("")
+      setPendingPartsMarkup("")
+      setPendingLaborMarkup("")
+      setPendingMiscMarkup("")
       fetchQuote()
       onUpdate?.()
     } catch (err) {
@@ -894,24 +909,34 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   // Edit Markup handlers (for modifying markup while enabled)
   const handleOpenEditMarkup = () => {
     if (!quote || !quote.markup_control_enabled) return
-    setEditingMarkupPercent(quote.global_markup_percent?.toString() || "")
+    setEditingPartsMarkup(quote.parts_markup_percent?.toString() || "0")
+    setEditingLaborMarkup(quote.labor_markup_percent?.toString() || "0")
+    setEditingMiscMarkup(quote.misc_markup_percent?.toString() || "0")
     setEditMarkupDialogOpen(true)
   }
 
   const handleConfirmUpdateMarkup = async () => {
-    const percent = parseFloat(editingMarkupPercent)
-    if (isNaN(percent) || percent < 0) {
-      alert("Please enter a valid markup percentage (0 or greater)")
+    const partsP = parseFloat(editingPartsMarkup) || 0
+    const laborP = parseFloat(editingLaborMarkup) || 0
+    const miscP = parseFloat(editingMiscMarkup) || 0
+
+    if (partsP < 0 || laborP < 0 || miscP < 0) {
+      alert("Markup percentages must be 0 or greater")
       return
     }
+
     setUpdatingMarkupPercent(true)
     try {
       await api.quotes.toggleMarkupControl(quoteId, {
         enabled: true,
-        global_markup_percent: percent
+        parts_markup_percent: partsP,
+        labor_markup_percent: laborP,
+        misc_markup_percent: miscP,
       })
       setEditMarkupDialogOpen(false)
-      setEditingMarkupPercent("")
+      setEditingPartsMarkup("")
+      setEditingLaborMarkup("")
+      setEditingMiscMarkup("")
       fetchQuote()
       onUpdate?.()
     } catch (err) {
@@ -1027,6 +1052,9 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         baseCost = item.miscellaneous.unit_price
         markupPercent = item.miscellaneous.markup_percent
       }
+
+      // Per-line-item markup overrides inventory markup
+      if (item.markup_percent != null) markupPercent = item.markup_percent
 
       // PMS items have 0 markup by definition
       if (item.is_pms) {
@@ -1177,6 +1205,10 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         baseCost = item.miscellaneous.unit_price
         markupPercent = item.miscellaneous.markup_percent
       }
+
+      // Per-line-item markup overrides inventory markup; staged edit overrides both
+      if (item.markup_percent != null) markupPercent = item.markup_percent
+      if (editedItem?.markup_percent != null) markupPercent = editedItem.markup_percent
 
       if (item.is_pms) markupPercent = 0
 
@@ -2040,6 +2072,10 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     <TableHead className="text-right">Fulfilled Price</TableHead>
                   </>
                 )}
+                {/* Markup % column - edit mode only, when global toggle is OFF */}
+                {editorMode === "edit" && !quote?.markup_control_enabled && (
+                  <TableHead className="text-right">Markup %</TableHead>
+                )}
                 <TableHead className="text-right">Unit Price</TableHead>
                 <TableHead className="text-center">Discount</TableHead>
                 {/* Non-edit mode: Qty Fulfilled and Fulfilled Price come after Unit Price/Discount */}
@@ -2183,6 +2219,32 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                           )}
                         </TableCell>
                       </>
+                    )}
+
+                    {/* Markup % Column — inline editable when global toggle is OFF */}
+                    {editorMode === "edit" && !quote?.markup_control_enabled && (
+                      <TableCell className="text-right">
+                        {item.is_pms ? (
+                          <span className="text-muted-foreground">-</span>
+                        ) : (
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            className="w-20 h-7 text-right text-sm inline-block"
+                            value={editedItem?.markup_percent ?? item.markup_percent ?? (
+                              item.part ? (item.part.markup_percent ?? 0) :
+                              item.labor ? item.labor.markup_percent :
+                              item.miscellaneous ? item.miscellaneous.markup_percent : 0
+                            )}
+                            onChange={(e) => {
+                              const val = e.target.value === "" ? 0 : parseFloat(e.target.value)
+                              if (!isNaN(val)) stageEdit(item, { markup_percent: val })
+                            }}
+                            disabled={isDeleted || hasBeenInvoiced}
+                          />
+                        )}
+                      </TableCell>
                     )}
 
                     {/* Unit Price Column */}
@@ -2395,6 +2457,10 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                         <TableCell className="text-right text-muted-foreground">-</TableCell>
                       </>
                     )}
+                    {/* Markup % — placeholder for staged adds */}
+                    {editorMode === "edit" && !quote?.markup_control_enabled && (
+                      <TableCell className="text-right text-muted-foreground">-</TableCell>
+                    )}
                     {/* Unit Price */}
                     <TableCell className="text-right text-green-700 dark:text-green-300 font-medium">${unitPrice.toFixed(2)}</TableCell>
                     {/* Discount */}
@@ -2461,6 +2527,10 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                         )}
                       </TableCell>
                     </>
+                  )}
+                  {/* Markup % — empty in footer */}
+                  {editorMode === "edit" && !quote?.markup_control_enabled && (
+                    <TableCell></TableCell>
                   )}
                   {/* Unit Price */}
                   <TableCell></TableCell>
@@ -2738,20 +2808,20 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               Markup Discount Control
             </CardTitle>
             <div className="flex items-center gap-3">
-              {/* Display current state */}
-              {quote.markup_control_enabled && quote.global_markup_percent !== null && (
+              {/* Display current section markup badges */}
+              {quote.markup_control_enabled && (quote.parts_markup_percent != null || quote.labor_markup_percent != null || quote.misc_markup_percent != null) && (
                 editorMode === "edit" ? (
                   <button
                     onClick={handleOpenEditMarkup}
                     className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors cursor-pointer"
-                    title="Click to edit global markup"
+                    title="Click to edit section markups"
                   >
-                    Global Markup: {quote.global_markup_percent}%
+                    Parts: {quote.parts_markup_percent ?? 0}% | Labour: {quote.labor_markup_percent ?? 0}% | Misc: {quote.misc_markup_percent ?? 0}%
                     <Pencil className="h-3 w-3" />
                   </button>
                 ) : (
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700">
-                    Global Markup: {quote.global_markup_percent}%
+                    Parts: {quote.parts_markup_percent ?? 0}% | Labour: {quote.labor_markup_percent ?? 0}% | Misc: {quote.misc_markup_percent ?? 0}%
                   </span>
                 )
               )}
@@ -2778,8 +2848,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         <CardContent>
           <p className="text-sm text-muted-foreground">
             {quote.markup_control_enabled
-              ? "Global markup is applied to all items. Discount codes are disabled."
-              : "Enable to apply a global markup percentage to all line items (excluding PMS items)."}
+              ? "Section markups are applied to all items. Discount codes are disabled."
+              : "Enable to apply markup percentages per section (Parts, Labour, Misc) to all line items (excluding PMS items)."}
           </p>
         </CardContent>
       </Card>
@@ -3365,20 +3435,41 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               Enable Markup Discount Control
             </DialogTitle>
             <DialogDescription>
-              Enter the global markup percentage to apply to all line items (excluding PMS items).
-              This will replace individual item markups.
+              Set markup percentages per section. These will replace individual item markups (excluding PMS items).
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-4">
             <div className="space-y-2">
-              <Label>Global Markup Percentage (%)</Label>
+              <Label>Parts Markup (%)</Label>
               <Input
                 type="number"
                 step="0.01"
                 min="0"
-                value={pendingMarkupPercent}
-                onChange={(e) => setPendingMarkupPercent(e.target.value)}
+                value={pendingPartsMarkup}
+                onChange={(e) => setPendingPartsMarkup(e.target.value)}
                 placeholder="e.g., 15.00"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Labour Markup (%)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={pendingLaborMarkup}
+                onChange={(e) => setPendingLaborMarkup(e.target.value)}
+                placeholder="e.g., 20.00"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Miscellaneous Markup (%)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={pendingMiscMarkup}
+                onChange={(e) => setPendingMiscMarkup(e.target.value)}
+                placeholder="e.g., 10.00"
               />
             </div>
             <DialogFooter>
@@ -3387,7 +3478,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               </Button>
               <Button
                 onClick={handleConfirmEnableMarkupControl}
-                disabled={togglingMarkupControl || !pendingMarkupPercent}
+                disabled={togglingMarkupControl || (!pendingPartsMarkup && !pendingLaborMarkup && !pendingMiscMarkup)}
               >
                 {togglingMarkupControl ? "Applying..." : "Enable Markup Control"}
               </Button>
@@ -3396,28 +3487,50 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         </DialogContent>
       </Dialog>
 
-      {/* Edit Markup Percent Dialog */}
+      {/* Edit Section Markup Dialog */}
       <Dialog open={editMarkupDialogOpen} onOpenChange={setEditMarkupDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Pencil className="h-4 w-4" />
-              Edit Global Markup
+              Edit Section Markups
             </DialogTitle>
             <DialogDescription>
-              Update the global markup percentage. All line items (excluding PMS) will be recalculated.
+              Update markup percentages per section. All line items (excluding PMS) will be recalculated.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-4">
             <div className="space-y-2">
-              <Label>Global Markup Percentage (%)</Label>
+              <Label>Parts Markup (%)</Label>
               <Input
                 type="number"
                 step="0.01"
                 min="0"
-                value={editingMarkupPercent}
-                onChange={(e) => setEditingMarkupPercent(e.target.value)}
+                value={editingPartsMarkup}
+                onChange={(e) => setEditingPartsMarkup(e.target.value)}
                 placeholder="e.g., 15.00"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Labour Markup (%)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={editingLaborMarkup}
+                onChange={(e) => setEditingLaborMarkup(e.target.value)}
+                placeholder="e.g., 20.00"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Miscellaneous Markup (%)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={editingMiscMarkup}
+                onChange={(e) => setEditingMiscMarkup(e.target.value)}
+                placeholder="e.g., 10.00"
               />
             </div>
             <DialogFooter>
@@ -3426,9 +3539,9 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               </Button>
               <Button
                 onClick={handleConfirmUpdateMarkup}
-                disabled={updatingMarkupPercent || !editingMarkupPercent}
+                disabled={updatingMarkupPercent || (!editingPartsMarkup && !editingLaborMarkup && !editingMiscMarkup)}
               >
-                {updatingMarkupPercent ? "Updating..." : "Update Markup"}
+                {updatingMarkupPercent ? "Updating..." : "Update Markups"}
               </Button>
             </DialogFooter>
           </div>
