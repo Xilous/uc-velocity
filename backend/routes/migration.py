@@ -53,12 +53,15 @@ def parse_csv(content: bytes) -> list[dict]:
 
 
 def clean_currency(val: str) -> float:
-    """Strip '$', ',', and whitespace from a currency string, return float."""
+    """Strip '$', ',', and whitespace from a currency string, return float.
+    Handles accounting-style negatives: (722.68) → -722.68"""
     if not val:
         return 0.0
     cleaned = val.replace("$", "").replace(",", "").strip()
     if not cleaned:
         return 0.0
+    if cleaned.startswith("(") and cleaned.endswith(")"):
+        cleaned = "-" + cleaned[1:-1]
     return float(cleaned)
 
 
