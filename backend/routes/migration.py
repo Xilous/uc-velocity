@@ -43,8 +43,11 @@ EXPECTED_FILES = [
 
 
 def parse_csv(content: bytes) -> list[dict]:
-    """Parse CSV bytes into list of dicts, handling BOM."""
-    text = content.decode("utf-8-sig")
+    """Parse CSV bytes into list of dicts, handling BOM and legacy encodings."""
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("cp1252")
     reader = csv.DictReader(io.StringIO(text))
     return list(reader)
 
