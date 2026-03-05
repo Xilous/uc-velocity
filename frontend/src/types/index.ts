@@ -614,6 +614,15 @@ export interface PricebookImportResult {
   errors: string[];
 }
 
+// ===== Legacy Migration =====
+export interface MigrationResult {
+  success: boolean;
+  counts: Record<string, number>;
+  warnings: string[];
+  errors: string[];
+  skipped_files: string[];
+}
+
 // ===== Quote Snapshots =====
 export type SnapshotActionType = 'create' | 'edit' | 'delete' | 'invoice' | 'revert';
 

@@ -48,9 +48,6 @@ def generate_next_uca_number(db: Session) -> str:
     existing = db.query(Project.uca_project_number).all()
     existing_numbers = [row[0] for row in existing if row[0]]
 
-    if not existing_numbers:
-        return "A0001"
-
     def parse_uca(uca: str) -> tuple:
         """Parse UCA into (letter_prefix, number)"""
         match = re.match(r'^([A-Z]+)(\d{4})$', uca)
@@ -63,8 +60,14 @@ def generate_next_uca_number(db: Session) -> str:
         prefix, num = parse_uca(uca)
         return (len(prefix), prefix, num)
 
+    # Filter to only valid-format numbers for auto-generation
+    # (legacy imports may have plain integers like "1", "27", "3679")
+    valid_numbers = [n for n in existing_numbers if re.match(r'^[A-Z]+\d{4}$', n)]
+    if not valid_numbers:
+        return "A0001"
+
     # Find the highest existing UCA number
-    highest = max(existing_numbers, key=uca_sort_key)
+    highest = max(valid_numbers, key=uca_sort_key)
     prefix, number = parse_uca(highest)
 
     # Increment
