@@ -190,7 +190,7 @@ class Quote(Base):
     parts_markup_percent = Column(Float, nullable=True)  # Section-level markup for parts
     labor_markup_percent = Column(Float, nullable=True)  # Section-level markup for labor
     misc_markup_percent = Column(Float, nullable=True)  # Section-level markup for misc
-    cost_code_id = Column(Integer, ForeignKey('cost_codes.id'), nullable=False)
+    cost_code_id = Column(Integer, ForeignKey('cost_codes.id'), nullable=True)
 
     # Relationships
     project = relationship("Project", back_populates="quotes")
@@ -245,7 +245,7 @@ class PurchaseOrder(Base):
     vendor_po_number = Column(String, nullable=True)
     expected_delivery_date = Column(DateTime, nullable=True)
     status = Column(Enum(POStatus), default=POStatus.draft)
-    cost_code_id = Column(Integer, ForeignKey('cost_codes.id'), nullable=False)
+    cost_code_id = Column(Integer, ForeignKey('cost_codes.id'), nullable=True)
 
     # Relationships
     project = relationship("Project", back_populates="purchase_orders")

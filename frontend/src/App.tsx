@@ -20,6 +20,7 @@ import { ProjectDetailsPage } from "@/pages/ProjectDetailsPage"
 import { DiscountCodesPage } from "@/pages/DiscountCodesPage"
 import { ReportsPage } from "@/pages/ReportsPage"
 import { SettingsPage } from "@/pages/SettingsPage"
+import { MigrationPage } from "@/pages/MigrationPage"
 import { api } from "@/api/client"
 import type { Part, Labor, Miscellaneous } from "@/types"
 import {
@@ -37,11 +38,12 @@ import {
   Search,
   BarChart3,
   Settings,
+  DatabaseZap,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Toaster } from "@/components/ui/toaster"
 
-type AppView = "profiles" | "projects" | "project-details" | "inventory" | "discount-codes" | "reports" | "settings"
+type AppView = "profiles" | "projects" | "project-details" | "inventory" | "discount-codes" | "reports" | "settings" | "migration"
 
 function App() {
   const [currentView, setCurrentView] = useState<AppView>("projects")
@@ -198,6 +200,9 @@ function App() {
 
       case "settings":
         return <SettingsPage />
+
+      case "migration":
+        return <MigrationPage />
 
       case "project-details":
         if (selectedProjectId === null) {
@@ -617,6 +622,14 @@ function App() {
             >
               <Settings className="h-4 w-4" />
               Settings
+            </Button>
+            <Button
+              variant={currentView === "migration" ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              onClick={() => setCurrentView("migration")}
+            >
+              <DatabaseZap className="h-4 w-4" />
+              Migration
             </Button>
           </nav>
         </ScrollArea>
