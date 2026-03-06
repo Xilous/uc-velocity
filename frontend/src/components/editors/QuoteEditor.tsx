@@ -58,7 +58,7 @@ import type {
 import { Plus, Minus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info, Copy, Car, MapPin, X, Lock, GitCommit, Eye, AlertTriangle, Check, CheckCircle2, Printer, Loader2, Hash } from "lucide-react"
 import { pdf } from '@react-pdf/renderer'
 import { QuotePDF } from '@/components/pdf/QuotePDF'
-import type { CompanySettings, Project } from '@/types'
+import type { CompanySettings, Project, SystemRate } from '@/types'
 import { QuoteAuditTrail } from "./QuoteAuditTrail"
 import { PartForm } from "@/components/forms/PartForm"
 import { LaborForm } from "@/components/forms/LaborForm"
@@ -184,7 +184,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
   // Parking and Travel Distance dialog states
   const [travelDistanceDialogOpen, setTravelDistanceDialogOpen] = useState(false)
-  const [travelDistanceItems, setTravelDistanceItems] = useState<Miscellaneous[]>([])
+  const [travelDistanceItems, setTravelDistanceItems] = useState<SystemRate[]>([])
   const [selectedTravelDistanceId, setSelectedTravelDistanceId] = useState<string>("")
   const [addingParking, setAddingParking] = useState(false)
   const [addingTravelDistance, setAddingTravelDistance] = useState(false)
@@ -947,9 +947,18 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   }
 
   // PMS dialog handlers
-  const openPmsDialog = (type: "percent" | "dollar") => {
+  const openPmsDialog = async (type: "percent" | "dollar") => {
     setPmsType(type)
-    setPmsValue("")
+    if (type === "percent") {
+      try {
+        const { default_pms_percent } = await api.systemRates.getPmsDefault()
+        setPmsValue(default_pms_percent != null ? String(default_pms_percent) : "")
+      } catch {
+        setPmsValue("")
+      }
+    } else {
+      setPmsValue("")
+    }
     setPmsDialogOpen(true)
   }
 
@@ -1331,7 +1340,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   // Fetch travel distance items for dialog
   const fetchTravelDistanceItems = async () => {
     try {
-      const items = await api.misc.getTravelDistanceItems()
+      const items = await api.systemRates.getTravelDistance()
       setTravelDistanceItems(items)
     } catch (err) {
       console.error("Failed to fetch travel distance items", err)
@@ -1344,8 +1353,13 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
     setAddingParking(true)
     try {
-      // Get the parking system item
-      const parkingItem = await api.misc.getParkingItem()
+      // Get the parking system rate
+      const parkingRate = await api.systemRates.getParking()
+      const miscId = parkingRate.linked_misc_id
+      if (!miscId) {
+        alert("Parking rate has no linked miscellaneous item. Please check Settings.")
+        return
+      }
 
       // Calculate total labor hours (excluding PMS)
       const totalLaborHours = calculateTotalLaborHours()
@@ -1358,17 +1372,19 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         return
       }
 
+      const parkingPrice = parkingRate.unit_price * (1 + parkingRate.markup_percent / 100)
+
       // Check if parking line item already exists in quote
       const existingParkingLine = quote.line_items.find(
         item => item.item_type === "misc" &&
-                item.misc_id === parkingItem.id
+                item.misc_id === miscId
       )
 
       // In edit mode, stage the changes instead of making direct API calls
       if (editorMode === "edit") {
         // Also check staged adds for already-staged parking
         const stagedParkingAdd = stagedAdds.find(
-          add => add.item_type === "misc" && add.misc_id === parkingItem.id
+          add => add.item_type === "misc" && add.misc_id === miscId
         )
 
         if (existingParkingLine) {
@@ -1382,13 +1398,14 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               : add
           ))
         } else {
-          // Stage a new add
+          // Stage a new add — use the linked misc record for FK compatibility
+          const miscRecord = await api.misc.get(miscId)
           stageAdd({
             item_type: "misc",
-            misc_id: parkingItem.id,
+            misc_id: miscId,
             quantity: parkingQty,
-            unit_price: parkingItem.unit_price * (1 + parkingItem.markup_percent / 100),
-            miscellaneous: parkingItem, // For display
+            unit_price: parkingPrice,
+            miscellaneous: miscRecord, // For display
           })
         }
         return
@@ -1404,9 +1421,9 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         // Add new line item
         const lineItem: QuoteLineItemCreate = {
           item_type: "misc",
-          misc_id: parkingItem.id,
+          misc_id: miscId,
           quantity: parkingQty,
-          unit_price: parkingItem.unit_price * (1 + parkingItem.markup_percent / 100)
+          unit_price: parkingPrice
         }
         await api.quotes.addLine(quoteId, lineItem)
       }
@@ -1433,12 +1450,18 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
     setAddingTravelDistance(true)
     try {
-      const selectedItem = travelDistanceItems.find(
+      const selectedRate = travelDistanceItems.find(
         item => item.id.toString() === selectedTravelDistanceId
       )
 
-      if (!selectedItem) {
+      if (!selectedRate) {
         alert("Please select a travel distance option")
+        return
+      }
+
+      const miscId = selectedRate.linked_misc_id
+      if (!miscId) {
+        alert("Selected travel tier has no linked miscellaneous item. Please check Settings.")
         return
       }
 
@@ -1451,17 +1474,19 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         return
       }
 
+      const travelPrice = selectedRate.unit_price * (1 + selectedRate.markup_percent / 100)
+
       // Check if this travel distance item already exists in quote
       const existingLine = quote.line_items.find(
         item => item.item_type === "misc" &&
-                item.misc_id === selectedItem.id
+                item.misc_id === miscId
       )
 
       // In edit mode, stage the changes instead of making direct API calls
       if (editorMode === "edit") {
         // Also check staged adds for already-staged travel item
         const stagedTravelAdd = stagedAdds.find(
-          add => add.item_type === "misc" && add.misc_id === selectedItem.id
+          add => add.item_type === "misc" && add.misc_id === miscId
         )
 
         if (existingLine) {
@@ -1475,13 +1500,14 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
               : add
           ))
         } else {
-          // Stage a new add
+          // Stage a new add — use the linked misc record for FK compatibility
+          const miscRecord = await api.misc.get(miscId)
           stageAdd({
             item_type: "misc",
-            misc_id: selectedItem.id,
+            misc_id: miscId,
             quantity: days,
-            unit_price: selectedItem.unit_price * (1 + selectedItem.markup_percent / 100),
-            miscellaneous: selectedItem, // For display
+            unit_price: travelPrice,
+            miscellaneous: miscRecord, // For display
           })
         }
         setTravelDistanceDialogOpen(false)
@@ -1498,9 +1524,9 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         // Add new line item
         const lineItem: QuoteLineItemCreate = {
           item_type: "misc",
-          misc_id: selectedItem.id,
+          misc_id: miscId,
           quantity: days,
-          unit_price: selectedItem.unit_price * (1 + selectedItem.markup_percent / 100)
+          unit_price: travelPrice
         }
         await api.quotes.addLine(quoteId, lineItem)
       }

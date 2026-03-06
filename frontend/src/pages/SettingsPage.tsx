@@ -23,7 +23,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { api } from '@/api/client'
-import type { CompanySettings, CompanySettingsUpdate, CostCode, CostCodeCreate } from '@/types'
+import type { CompanySettings, CompanySettingsUpdate, CostCode, CostCodeCreate, SystemRate, SystemRateCreate, SystemRateUpdate } from '@/types'
 import { Loader2, Save, Pencil, Trash2, Plus, X, Check } from 'lucide-react'
 
 // Inline editing row state
@@ -60,9 +60,31 @@ export function SettingsPage() {
   const [costCodeError, setCostCodeError] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<CostCode | null>(null)
 
+  // Parking rate state
+  const [parkingRate, setParkingRate] = useState<SystemRate | null>(null)
+  const [editingParking, setEditingParking] = useState(false)
+  const [parkingForm, setParkingForm] = useState({ description: '', unit_price: '', markup_percent: '' })
+  const [parkingSaving, setParkingSaving] = useState(false)
+
+  // Travel distance state
+  const [travelTiers, setTravelTiers] = useState<SystemRate[]>([])
+  const [travelLoading, setTravelLoading] = useState(true)
+  const [editingTravelId, setEditingTravelId] = useState<number | null>(null)
+  const [editingTravel, setEditingTravel] = useState<{ description: string; unit_price: string; markup_percent: string; sort_order: string } | null>(null)
+  const [addingTravel, setAddingTravel] = useState(false)
+  const [newTravel, setNewTravel] = useState({ description: '', unit_price: '', markup_percent: '', sort_order: '' })
+  const [travelSaving, setTravelSaving] = useState(false)
+  const [travelError, setTravelError] = useState<string | null>(null)
+  const [deleteTravelConfirm, setDeleteTravelConfirm] = useState<SystemRate | null>(null)
+
+  // PMS default state
+  const [pmsDefault, setPmsDefault] = useState('')
+
   useEffect(() => {
     fetchSettings()
     fetchCostCodes()
+    fetchParkingRate()
+    fetchTravelTiers()
   }, [])
 
   const fetchSettings = async () => {
@@ -77,6 +99,7 @@ export function SettingsPage() {
       setFax(data.fax || '')
       setGstNumber(data.gst_number || '')
       setHstRate(String(data.hst_rate ?? 13.0))
+      setPmsDefault(data.default_pms_percent != null ? String(data.default_pms_percent) : '')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings')
     } finally {
@@ -96,6 +119,156 @@ export function SettingsPage() {
     }
   }
 
+  // Parking rate handlers
+  const fetchParkingRate = async () => {
+    try {
+      const data = await api.systemRates.getParking()
+      setParkingRate(data)
+    } catch (_) {
+      // Parking rate may not exist yet
+    }
+  }
+
+  const startEditParking = () => {
+    if (!parkingRate) return
+    setParkingForm({
+      description: parkingRate.description,
+      unit_price: String(parkingRate.unit_price),
+      markup_percent: String(parkingRate.markup_percent),
+    })
+    setEditingParking(true)
+  }
+
+  const saveParking = async () => {
+    const unit_price = parseFloat(parkingForm.unit_price)
+    const markup_percent = parseFloat(parkingForm.markup_percent)
+    if (isNaN(unit_price) || unit_price < 0) { setError('Parking base cost must be a non-negative number.'); return }
+    if (isNaN(markup_percent) || markup_percent < 0) { setError('Parking markup must be a non-negative number.'); return }
+
+    setParkingSaving(true)
+    setError(null)
+    try {
+      const updated = await api.systemRates.updateParking({
+        description: parkingForm.description.trim(),
+        unit_price,
+        markup_percent,
+      })
+      setParkingRate(updated)
+      setEditingParking(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update parking rate')
+    } finally {
+      setParkingSaving(false)
+    }
+  }
+
+  // Travel distance handlers
+  const fetchTravelTiers = async () => {
+    setTravelLoading(true)
+    try {
+      const data = await api.systemRates.getTravelDistance()
+      setTravelTiers(data)
+    } catch (err) {
+      setTravelError(err instanceof Error ? err.message : 'Failed to load travel tiers')
+    } finally {
+      setTravelLoading(false)
+    }
+  }
+
+  const startEditTravel = (tier: SystemRate) => {
+    setEditingTravelId(tier.id)
+    setEditingTravel({
+      description: tier.description,
+      unit_price: String(tier.unit_price),
+      markup_percent: String(tier.markup_percent),
+      sort_order: String(tier.sort_order),
+    })
+    setTravelError(null)
+  }
+
+  const cancelEditTravel = () => {
+    setEditingTravelId(null)
+    setEditingTravel(null)
+  }
+
+  const saveEditTravel = async () => {
+    if (!editingTravel || editingTravelId === null) return
+    const unit_price = parseFloat(editingTravel.unit_price)
+    const markup_percent = parseFloat(editingTravel.markup_percent)
+    const sort_order = parseInt(editingTravel.sort_order)
+    if (!editingTravel.description.trim()) { setTravelError('Description is required.'); return }
+    if (isNaN(unit_price) || unit_price < 0) { setTravelError('Base cost must be a non-negative number.'); return }
+    if (isNaN(markup_percent) || markup_percent < 0) { setTravelError('Markup must be a non-negative number.'); return }
+
+    setTravelSaving(true)
+    setTravelError(null)
+    try {
+      await api.systemRates.updateTravelDistance(editingTravelId, {
+        description: editingTravel.description.trim(),
+        unit_price,
+        markup_percent,
+        sort_order: isNaN(sort_order) ? undefined : sort_order,
+      })
+      setEditingTravelId(null)
+      setEditingTravel(null)
+      fetchTravelTiers()
+    } catch (err) {
+      setTravelError(err instanceof Error ? err.message : 'Failed to update travel tier')
+    } finally {
+      setTravelSaving(false)
+    }
+  }
+
+  const startAddTravel = () => {
+    const nextSort = travelTiers.length > 0 ? Math.max(...travelTiers.map(t => t.sort_order)) + 1 : 1
+    setAddingTravel(true)
+    setNewTravel({ description: '', unit_price: '', markup_percent: '', sort_order: String(nextSort) })
+    setTravelError(null)
+  }
+
+  const cancelAddTravel = () => {
+    setAddingTravel(false)
+    setNewTravel({ description: '', unit_price: '', markup_percent: '', sort_order: '' })
+  }
+
+  const saveNewTravel = async () => {
+    const unit_price = parseFloat(newTravel.unit_price)
+    const markup_percent = parseFloat(newTravel.markup_percent || '0')
+    const sort_order = parseInt(newTravel.sort_order || '0')
+    if (!newTravel.description.trim()) { setTravelError('Description is required.'); return }
+    if (isNaN(unit_price) || unit_price < 0) { setTravelError('Base cost must be a non-negative number.'); return }
+
+    setTravelSaving(true)
+    setTravelError(null)
+    try {
+      await api.systemRates.createTravelDistance({
+        description: newTravel.description.trim(),
+        unit_price,
+        markup_percent: isNaN(markup_percent) ? 0 : markup_percent,
+        sort_order: isNaN(sort_order) ? 0 : sort_order,
+      })
+      setAddingTravel(false)
+      setNewTravel({ description: '', unit_price: '', markup_percent: '', sort_order: '' })
+      fetchTravelTiers()
+    } catch (err) {
+      setTravelError(err instanceof Error ? err.message : 'Failed to create travel tier')
+    } finally {
+      setTravelSaving(false)
+    }
+  }
+
+  const deleteTravel = async (tier: SystemRate) => {
+    setTravelError(null)
+    try {
+      await api.systemRates.deleteTravelDistance(tier.id)
+      setDeleteTravelConfirm(null)
+      fetchTravelTiers()
+    } catch (err) {
+      setDeleteTravelConfirm(null)
+      setTravelError(err instanceof Error ? err.message : 'Failed to delete travel tier')
+    }
+  }
+
   const handleSave = async () => {
     setError(null)
     setSuccessMessage(null)
@@ -103,6 +276,12 @@ export function SettingsPage() {
     const hstValue = parseFloat(hstRate)
     if (isNaN(hstValue) || hstValue < 0 || hstValue > 100) {
       setError('HST Rate must be a number between 0 and 100.')
+      return
+    }
+
+    const pmsValue = pmsDefault.trim() === '' ? null : parseFloat(pmsDefault)
+    if (pmsValue !== null && (isNaN(pmsValue) || pmsValue < 0 || pmsValue > 100)) {
+      setError('Default PMS Percentage must be a number between 0 and 100.')
       return
     }
 
@@ -115,6 +294,7 @@ export function SettingsPage() {
         fax,
         gst_number: gstNumber,
         hst_rate: hstValue,
+        default_pms_percent: pmsValue,
       }
       const data = await api.companySettings.update(update)
       setSettings(data)
@@ -306,25 +486,325 @@ export function SettingsPage() {
           <CardTitle>Business Variables</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="max-w-xs space-y-2">
-            <Label htmlFor="hst-rate">HST Rate (Ontario Harmonized Sales Tax)</Label>
-            <div className="relative">
-              <Input
-                id="hst-rate"
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                value={hstRate}
-                onChange={(e) => setHstRate(e.target.value)}
-                className="pr-8"
-              />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="max-w-xs space-y-2">
+              <Label htmlFor="hst-rate">HST Rate (Ontario Harmonized Sales Tax)</Label>
+              <div className="relative">
+                <Input
+                  id="hst-rate"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={hstRate}
+                  onChange={(e) => setHstRate(e.target.value)}
+                  className="pr-8"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Applied to quotes, invoices, and purchase orders. Ontario HST is 13%.
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Applied to quotes, invoices, and purchase orders. Ontario HST is 13%.
-            </p>
+            <div className="max-w-xs space-y-2">
+              <Label htmlFor="pms-default">Default PMS Percentage</Label>
+              <div className="relative">
+                <Input
+                  id="pms-default"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={pmsDefault}
+                  onChange={(e) => setPmsDefault(e.target.value)}
+                  className="pr-8"
+                  placeholder="e.g. 10"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Pre-filled when adding PMS % items to quotes. Leave empty for no default.
+              </p>
+            </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Parking Rate */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Parking Rate</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {parkingRate ? (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Description</TableHead>
+                    <TableHead className="w-[130px]">Base Cost ($)</TableHead>
+                    <TableHead className="w-[130px]">Markup (%)</TableHead>
+                    <TableHead className="w-[130px]">Total ($)</TableHead>
+                    <TableHead className="w-[80px] text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow>
+                    {editingParking ? (
+                      <>
+                        <TableCell>
+                          <Input
+                            value={parkingForm.description}
+                            onChange={(e) => setParkingForm({ ...parkingForm, description: e.target.value })}
+                            className="h-8"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={parkingForm.unit_price}
+                            onChange={(e) => setParkingForm({ ...parkingForm, unit_price: e.target.value })}
+                            className="h-8"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={parkingForm.markup_percent}
+                            onChange={(e) => setParkingForm({ ...parkingForm, markup_percent: e.target.value })}
+                            className="h-8"
+                          />
+                        </TableCell>
+                        <TableCell className="text-sm font-medium">
+                          ${(parseFloat(parkingForm.unit_price || '0') * (1 + parseFloat(parkingForm.markup_percent || '0') / 100)).toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={saveParking} disabled={parkingSaving}>
+                              {parkingSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 text-green-600" />}
+                            </Button>
+                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingParking(false)}>
+                              <X className="h-4 w-4 text-muted-foreground" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </>
+                    ) : (
+                      <>
+                        <TableCell className="font-medium">{parkingRate.description}</TableCell>
+                        <TableCell>${parkingRate.unit_price.toFixed(2)}</TableCell>
+                        <TableCell>{parkingRate.markup_percent.toFixed(1)}%</TableCell>
+                        <TableCell className="font-medium">
+                          ${(parkingRate.unit_price * (1 + parkingRate.markup_percent / 100)).toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={startEditParking}>
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        </TableCell>
+                      </>
+                    )}
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Parking rate not configured. It will be created on next deployment.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Travel Distance Tiers */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Travel Distance Tiers</CardTitle>
+          <Button
+            size="sm"
+            onClick={startAddTravel}
+            disabled={addingTravel || editingTravelId !== null}
+            className="gap-1"
+          >
+            <Plus className="h-4 w-4" />
+            Add New
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {travelError && (
+            <div className="p-3 mb-4 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-sm">
+              {travelError}
+            </div>
+          )}
+
+          {travelLoading ? (
+            <div className="p-4 text-center text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
+              Loading travel tiers...
+            </div>
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Description</TableHead>
+                    <TableHead className="w-[120px]">Base Cost ($)</TableHead>
+                    <TableHead className="w-[110px]">Markup (%)</TableHead>
+                    <TableHead className="w-[120px]">Total ($)</TableHead>
+                    <TableHead className="w-[80px]">Order</TableHead>
+                    <TableHead className="w-[100px] text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {travelTiers.map((tier) => (
+                    <TableRow key={tier.id}>
+                      {editingTravelId === tier.id && editingTravel ? (
+                        <>
+                          <TableCell>
+                            <Input
+                              value={editingTravel.description}
+                              onChange={(e) => setEditingTravel({ ...editingTravel, description: e.target.value })}
+                              className="h-8"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number" min="0" step="0.01"
+                              value={editingTravel.unit_price}
+                              onChange={(e) => setEditingTravel({ ...editingTravel, unit_price: e.target.value })}
+                              className="h-8"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number" min="0" step="0.01"
+                              value={editingTravel.markup_percent}
+                              onChange={(e) => setEditingTravel({ ...editingTravel, markup_percent: e.target.value })}
+                              className="h-8"
+                            />
+                          </TableCell>
+                          <TableCell className="text-sm font-medium">
+                            ${(parseFloat(editingTravel.unit_price || '0') * (1 + parseFloat(editingTravel.markup_percent || '0') / 100)).toFixed(2)}
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number" min="0"
+                              value={editingTravel.sort_order}
+                              onChange={(e) => setEditingTravel({ ...editingTravel, sort_order: e.target.value })}
+                              className="h-8 w-16"
+                            />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={saveEditTravel} disabled={travelSaving}>
+                                {travelSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 text-green-600" />}
+                              </Button>
+                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={cancelEditTravel}>
+                                <X className="h-4 w-4 text-muted-foreground" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </>
+                      ) : (
+                        <>
+                          <TableCell className="font-medium">{tier.description}</TableCell>
+                          <TableCell>${tier.unit_price.toFixed(2)}</TableCell>
+                          <TableCell>{tier.markup_percent.toFixed(1)}%</TableCell>
+                          <TableCell className="font-medium">
+                            ${(tier.unit_price * (1 + tier.markup_percent / 100)).toFixed(2)}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{tier.sort_order}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                size="icon" variant="ghost" className="h-7 w-7"
+                                onClick={() => startEditTravel(tier)}
+                                disabled={addingTravel || editingTravelId !== null}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                size="icon" variant="ghost"
+                                className="h-7 w-7 text-destructive hover:text-destructive"
+                                onClick={() => setDeleteTravelConfirm(tier)}
+                                disabled={addingTravel || editingTravelId !== null}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </>
+                      )}
+                    </TableRow>
+                  ))}
+
+                  {/* Add new row */}
+                  {addingTravel && (
+                    <TableRow>
+                      <TableCell>
+                        <Input
+                          value={newTravel.description}
+                          onChange={(e) => setNewTravel({ ...newTravel, description: e.target.value })}
+                          className="h-8"
+                          placeholder='e.g. "Travel Distance (300km) (1 Day)"'
+                          autoFocus
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number" min="0" step="0.01"
+                          value={newTravel.unit_price}
+                          onChange={(e) => setNewTravel({ ...newTravel, unit_price: e.target.value })}
+                          className="h-8"
+                          placeholder="0.00"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number" min="0" step="0.01"
+                          value={newTravel.markup_percent}
+                          onChange={(e) => setNewTravel({ ...newTravel, markup_percent: e.target.value })}
+                          className="h-8"
+                          placeholder="0.0"
+                        />
+                      </TableCell>
+                      <TableCell className="text-sm font-medium">
+                        ${(parseFloat(newTravel.unit_price || '0') * (1 + parseFloat(newTravel.markup_percent || '0') / 100)).toFixed(2)}
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number" min="0"
+                          value={newTravel.sort_order}
+                          onChange={(e) => setNewTravel({ ...newTravel, sort_order: e.target.value })}
+                          className="h-8 w-16"
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={saveNewTravel} disabled={travelSaving}>
+                            {travelSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 text-green-600" />}
+                          </Button>
+                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={cancelAddTravel}>
+                            <X className="h-4 w-4 text-muted-foreground" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+
+                  {travelTiers.length === 0 && !addingTravel && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                        No travel distance tiers found. Click "Add New" to create one.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -517,7 +997,7 @@ export function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Delete confirmation dialog */}
+      {/* Delete cost code confirmation dialog */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -532,6 +1012,28 @@ export function SettingsPage() {
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => deleteConfirm && deleteCostCode(deleteConfirm)}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete travel tier confirmation dialog */}
+      <AlertDialog open={!!deleteTravelConfirm} onOpenChange={(open) => !open && setDeleteTravelConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Travel Distance Tier</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to remove <strong>{deleteTravelConfirm?.description}</strong>?
+              Existing quotes using this tier will not be affected.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => deleteTravelConfirm && deleteTravel(deleteTravelConfirm)}
             >
               Delete
             </AlertDialogAction>

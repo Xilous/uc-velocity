@@ -19,15 +19,15 @@ def get_all_miscellaneous(skip: int = 0, limit: int = 100, db: Session = Depends
     return misc_items
 
 
-@router.get("/system-items/", response_model=List[MiscellaneousSchema])
+@router.get("/system-items/", response_model=List[MiscellaneousSchema], deprecated=True)
 def get_system_miscellaneous(db: Session = Depends(get_db)):
-    """Get all system miscellaneous items (Parking, Travel Distance)."""
+    """Deprecated: Use /system-rates/ endpoints instead."""
     return db.query(Miscellaneous).filter(Miscellaneous.is_system_item == True).all()
 
 
-@router.get("/system-items/parking", response_model=MiscellaneousSchema)
+@router.get("/system-items/parking", response_model=MiscellaneousSchema, deprecated=True)
 def get_parking_item(db: Session = Depends(get_db)):
-    """Get the system Parking item."""
+    """Deprecated: Use GET /system-rates/parking instead."""
     item = db.query(Miscellaneous).filter(
         Miscellaneous.is_system_item == True,
         Miscellaneous.description == "Parking (1 Hour)"
@@ -37,9 +37,9 @@ def get_parking_item(db: Session = Depends(get_db)):
     return item
 
 
-@router.get("/system-items/travel-distance", response_model=List[MiscellaneousSchema])
+@router.get("/system-items/travel-distance", response_model=List[MiscellaneousSchema], deprecated=True)
 def get_travel_distance_items(db: Session = Depends(get_db)):
-    """Get all Travel Distance system items."""
+    """Deprecated: Use GET /system-rates/travel-distance instead."""
     return db.query(Miscellaneous).filter(
         Miscellaneous.is_system_item == True,
         or_(

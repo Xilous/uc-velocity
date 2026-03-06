@@ -17,6 +17,7 @@ class CompanySettingsBase(BaseModel):
     fax: Optional[str] = None
     gst_number: Optional[str] = None
     hst_rate: float = 13.0
+    default_pms_percent: Optional[float] = None
 
 
 class CompanySettingsUpdate(BaseModel):
@@ -26,10 +27,43 @@ class CompanySettingsUpdate(BaseModel):
     fax: Optional[str] = None
     gst_number: Optional[str] = None
     hst_rate: Optional[float] = None
+    default_pms_percent: Optional[float] = None
 
 
 class CompanySettings(CompanySettingsBase):
     id: int
+
+    class Config:
+        from_attributes = True
+
+
+# ===== System Rate Schemas =====
+class SystemRateBase(BaseModel):
+    rate_type: str
+    description: str
+    unit_price: float
+    markup_percent: float = 0.0
+    sort_order: int = 0
+    is_active: bool = True
+
+
+class SystemRateCreate(BaseModel):
+    description: str
+    unit_price: float
+    markup_percent: float = 0.0
+    sort_order: int = 0
+
+
+class SystemRateUpdate(BaseModel):
+    description: Optional[str] = None
+    unit_price: Optional[float] = None
+    markup_percent: Optional[float] = None
+    sort_order: Optional[int] = None
+
+
+class SystemRate(SystemRateBase):
+    id: int
+    linked_misc_id: Optional[int] = None
 
     class Config:
         from_attributes = True

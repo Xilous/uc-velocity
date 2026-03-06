@@ -34,13 +34,11 @@ import {
   Boxes,
   Tag,
   FileText,
-  Lock,
   Search,
   BarChart3,
   Settings,
   DatabaseZap,
 } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
 import { Toaster } from "@/components/ui/toaster"
 
 type AppView = "profiles" | "projects" | "project-details" | "inventory" | "discount-codes" | "reports" | "settings" | "migration"
@@ -236,6 +234,7 @@ function App() {
         })
 
         const filteredMiscItems = miscItems.filter((misc) => {
+          if (misc.is_system_item) return false
           const term = inventorySearchTerm.toLowerCase()
           if (!term) return true
           return misc.description.toLowerCase().includes(term)
@@ -499,15 +498,7 @@ function App() {
                         {filteredMiscItems.map((misc) => (
                           <tr key={misc.id} className="hover:bg-muted/50">
                             <td className="px-4 py-3 text-sm font-medium">
-                              <div className="flex items-center gap-2">
-                                {misc.description}
-                                {misc.is_system_item && (
-                                  <Badge variant="secondary" className="text-xs">
-                                    <Lock className="h-3 w-3 mr-1" />
-                                    System
-                                  </Badge>
-                                )}
-                              </div>
+                              {misc.description}
                             </td>
                             <td className="px-4 py-3 text-sm text-muted-foreground text-right">
                               ${misc.unit_price.toFixed(2)}
@@ -530,11 +521,8 @@ function App() {
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => handleDeleteMisc(misc.id)}
-                                disabled={misc.is_system_item}
-                                className={`text-destructive hover:text-destructive hover:bg-destructive/10 ${
-                                  misc.is_system_item ? 'opacity-50 cursor-not-allowed' : ''
-                                }`}
-                                title={misc.is_system_item ? "System items cannot be deleted" : "Delete"}
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                title="Delete"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
