@@ -755,7 +755,7 @@ async def import_legacy_data(
             count = 0
 
             # Create placeholder vendor for POs with missing vendor references
-            placeholder_vendor = Profile(name="Unknown Vendor (Legacy)", type=ProfileType.vendor)
+            placeholder_vendor = Profile(name="Unknown Vendor (Legacy)", type=ProfileType.vendor, pst="", address="", postal_code="")
             db.add(placeholder_vendor)
             db.flush()
             placeholder_vendor_id = placeholder_vendor.id
