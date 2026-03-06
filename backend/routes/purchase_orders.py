@@ -271,7 +271,7 @@ router = APIRouter(prefix="/purchase-orders", tags=["purchase-orders"])
 
 
 @router.get("/", response_model=List[PurchaseOrderSchema])
-def get_all_purchase_orders(skip: int = 0, limit: int = None, db: Session = Depends(get_db)):
+def get_all_purchase_orders(skip: int = 0, limit: int = None, db: Session = Depends(get_db)):  # limit=None until pagination is implemented
     """Get all purchase orders."""
     pos = (
         db.query(PurchaseOrder)
