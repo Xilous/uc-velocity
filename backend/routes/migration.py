@@ -23,6 +23,7 @@ from models import (
 
 router = APIRouter(prefix="/migration", tags=["migration"])
 
+BATCH_SIZE = 500
 
 # The 13 CSV files we recognize, in processing order
 EXPECTED_FILES = [
@@ -105,6 +106,16 @@ def safe_str(val: str | None, default: str = "") -> str:
     return val.strip() or default
 
 
+def flush_batch(db: Session, batch: list, id_map: dict):
+    """Flush a batch of (legacy_id, orm_object) and populate id_map."""
+    if not batch:
+        return
+    db.flush()
+    for legacy_id, obj in batch:
+        id_map[legacy_id] = obj.id
+    batch.clear()
+
+
 @router.post("/import")
 async def import_legacy_data(
     files: List[UploadFile] = File(...),
@@ -178,6 +189,9 @@ async def import_legacy_data(
         if "tblPartsCategories.csv" in file_contents:
             rows = parse_csv(file_contents["tblPartsCategories.csv"])
             count = 0
+            batch_part: list[tuple[int, Category]] = []
+            batch_labor: list[tuple[int, Category]] = []
+
             for row in rows:
                 legacy_id = safe_int(row.get("CategoryID", ""))
                 name = safe_str(row.get("chrCategoryName", ""))
@@ -190,44 +204,52 @@ async def import_legacy_data(
                 if cat_type == "Application":
                     cat = Category(name=name, type="labor")
                     db.add(cat)
-                    db.flush()
-                    cat_map_labor[legacy_id] = cat.id
+                    batch_labor.append((legacy_id, cat))
                     count += 1
                 elif cat_type == "Material":
                     cat = Category(name=name, type="part")
                     db.add(cat)
-                    db.flush()
-                    cat_map_part[legacy_id] = cat.id
+                    batch_part.append((legacy_id, cat))
                     count += 1
                 elif cat_type == "Application & Material":
-                    # Create two rows: one part, one labor
                     cat_p = Category(name=name, type="part")
                     db.add(cat_p)
-                    db.flush()
-                    cat_map_part[legacy_id] = cat_p.id
+                    batch_part.append((legacy_id, cat_p))
 
                     cat_l = Category(name=name, type="labor")
                     db.add(cat_l)
-                    db.flush()
-                    cat_map_labor[legacy_id] = cat_l.id
+                    batch_labor.append((legacy_id, cat_l))
                     count += 2
                 else:
                     warnings.append(f"Categories: unknown type '{cat_type}' for ID {legacy_id}")
                     continue
 
+                if len(batch_part) + len(batch_labor) >= BATCH_SIZE:
+                    flush_batch(db, batch_part, cat_map_part)
+                    flush_batch(db, batch_labor, cat_map_labor)
+
+            flush_batch(db, batch_part, cat_map_part)
+            flush_batch(db, batch_labor, cat_map_labor)
             counts["categories"] = count
 
         # === 2. Customers (tblClients) ===
         if "tblClients.csv" in file_contents:
             rows = parse_csv(file_contents["tblClients.csv"])
             count = 0
+            batch: list[tuple[int, Profile]] = []
+            # Pending contacts: list of (profile_obj, contact_data_list)
+            pending_contacts: list[tuple[Profile, list[dict]]] = []
+
             for row in rows:
                 legacy_id = safe_int(row.get("Client ID", ""))
                 name = safe_str(row.get("chrCompanyName", ""))
 
-                if not legacy_id or not name:
-                    warnings.append(f"Customers: skipped row with empty ID or name")
+                if not legacy_id:
+                    warnings.append(f"Customers: skipped row with empty ID")
                     continue
+
+                if not name:
+                    name = f"Unknown Customer {legacy_id}"
 
                 # Build address
                 addr_parts = [
@@ -245,51 +267,71 @@ async def import_legacy_data(
                     postal_code=safe_str(row.get("chrPostalCode", "")),
                 )
                 db.add(profile)
-                db.flush()
-                customer_map[legacy_id] = profile.id
+                batch.append((legacy_id, profile))
                 count += 1
 
-                # Contact 1
+                # Collect contact data for this profile
+                contacts_data = []
                 first1 = safe_str(row.get("chrFirstName", ""))
                 last1 = safe_str(row.get("chrLastName", ""))
                 contact_name1 = f"{first1} {last1}".strip()
                 if contact_name1:
-                    contact1 = Contact(
-                        profile_id=profile.id,
-                        name=contact_name1,
-                        job_title=safe_str(row.get("chrTitle", "")) or None,
-                        email=safe_str(row.get("chrEmailAddress", "")) or None,
-                    )
-                    db.add(contact1)
-                    db.flush()
-
-                    phone1 = safe_str(row.get("chrPhoneNumber", ""))
-                    if phone1:
-                        db.add(ContactPhone(contact_id=contact1.id, type=PhoneType.work, number=phone1))
-                    cell1 = safe_str(row.get("chrCell", ""))
-                    if cell1:
-                        db.add(ContactPhone(contact_id=contact1.id, type=PhoneType.mobile, number=cell1))
-
-                # Contact 2
+                    contacts_data.append({
+                        "name": contact_name1,
+                        "job_title": safe_str(row.get("chrTitle", "")) or None,
+                        "email": safe_str(row.get("chrEmailAddress", "")) or None,
+                        "phone": safe_str(row.get("chrPhoneNumber", "")),
+                        "cell": safe_str(row.get("chrCell", "")),
+                    })
                 first2 = safe_str(row.get("chrFirstName2", ""))
                 last2 = safe_str(row.get("chrLastName2", ""))
                 contact_name2 = f"{first2} {last2}".strip()
                 if contact_name2:
-                    contact2 = Contact(
-                        profile_id=profile.id,
-                        name=contact_name2,
-                        job_title=safe_str(row.get("chrTitle2", "")) or None,
-                        email=safe_str(row.get("chrEmailAddress2", "")) or None,
-                    )
-                    db.add(contact2)
-                    db.flush()
+                    contacts_data.append({
+                        "name": contact_name2,
+                        "job_title": safe_str(row.get("chrTitle2", "")) or None,
+                        "email": safe_str(row.get("chrEmailAddress2", "")) or None,
+                        "phone": safe_str(row.get("chrPhoneNumber2", "")),
+                        "cell": safe_str(row.get("chrCell2", "")),
+                    })
+                if contacts_data:
+                    pending_contacts.append((profile, contacts_data))
 
-                    phone2 = safe_str(row.get("chrPhoneNumber2", ""))
-                    if phone2:
-                        db.add(ContactPhone(contact_id=contact2.id, type=PhoneType.work, number=phone2))
-                    cell2 = safe_str(row.get("chrCell2", ""))
-                    if cell2:
-                        db.add(ContactPhone(contact_id=contact2.id, type=PhoneType.mobile, number=cell2))
+                if len(batch) >= BATCH_SIZE:
+                    flush_batch(db, batch, customer_map)
+                    # Create contacts for flushed profiles (they now have IDs)
+                    for prof, cdata_list in pending_contacts:
+                        for cdata in cdata_list:
+                            contact = Contact(
+                                profile_id=prof.id,
+                                name=cdata["name"],
+                                job_title=cdata["job_title"],
+                                email=cdata["email"],
+                            )
+                            db.add(contact)
+                            db.flush()
+                            if cdata["phone"]:
+                                db.add(ContactPhone(contact_id=contact.id, type=PhoneType.work, number=cdata["phone"]))
+                            if cdata["cell"]:
+                                db.add(ContactPhone(contact_id=contact.id, type=PhoneType.mobile, number=cdata["cell"]))
+                    pending_contacts.clear()
+
+            flush_batch(db, batch, customer_map)
+            for prof, cdata_list in pending_contacts:
+                for cdata in cdata_list:
+                    contact = Contact(
+                        profile_id=prof.id,
+                        name=cdata["name"],
+                        job_title=cdata["job_title"],
+                        email=cdata["email"],
+                    )
+                    db.add(contact)
+                    db.flush()
+                    if cdata["phone"]:
+                        db.add(ContactPhone(contact_id=contact.id, type=PhoneType.work, number=cdata["phone"]))
+                    if cdata["cell"]:
+                        db.add(ContactPhone(contact_id=contact.id, type=PhoneType.mobile, number=cdata["cell"]))
+            pending_contacts.clear()
 
             counts["customers"] = count
 
@@ -297,13 +339,19 @@ async def import_legacy_data(
         if "tblVendors.csv" in file_contents:
             rows = parse_csv(file_contents["tblVendors.csv"])
             count = 0
+            batch: list[tuple[int, Profile]] = []
+            pending_contacts: list[tuple[Profile, dict]] = []
+
             for row in rows:
                 legacy_id = safe_int(row.get("VendorID", ""))
                 name = safe_str(row.get("chrCompanyName", ""))
 
-                if not legacy_id or not name:
-                    warnings.append(f"Vendors: skipped row with empty ID or name")
+                if not legacy_id:
+                    warnings.append(f"Vendors: skipped row with empty ID")
                     continue
+
+                if not name:
+                    name = f"Unknown Vendor {legacy_id}"
 
                 addr_parts = [
                     safe_str(row.get("chrAddress", "")),
@@ -323,8 +371,7 @@ async def import_legacy_data(
                     website=website,
                 )
                 db.add(profile)
-                db.flush()
-                vendor_map[legacy_id] = profile.id
+                batch.append((legacy_id, profile))
                 count += 1
 
                 # One contact per vendor
@@ -332,17 +379,38 @@ async def import_legacy_data(
                 last = safe_str(row.get("chrLastName", ""))
                 contact_name = f"{first} {last}".strip()
                 if contact_name:
-                    contact = Contact(
-                        profile_id=profile.id,
-                        name=contact_name,
-                        email=safe_str(row.get("chrEmailAddress", "")).strip("'") or None,
-                    )
-                    db.add(contact)
-                    db.flush()
+                    pending_contacts.append((profile, {
+                        "name": contact_name,
+                        "email": safe_str(row.get("chrEmailAddress", "")).strip("'") or None,
+                        "phone": safe_str(row.get("chrPhoneNumber", "")),
+                    }))
 
-                    phone = safe_str(row.get("chrPhoneNumber", ""))
-                    if phone:
-                        db.add(ContactPhone(contact_id=contact.id, type=PhoneType.work, number=phone))
+                if len(batch) >= BATCH_SIZE:
+                    flush_batch(db, batch, vendor_map)
+                    for prof, cdata in pending_contacts:
+                        contact = Contact(
+                            profile_id=prof.id,
+                            name=cdata["name"],
+                            email=cdata["email"],
+                        )
+                        db.add(contact)
+                        db.flush()
+                        if cdata["phone"]:
+                            db.add(ContactPhone(contact_id=contact.id, type=PhoneType.work, number=cdata["phone"]))
+                    pending_contacts.clear()
+
+            flush_batch(db, batch, vendor_map)
+            for prof, cdata in pending_contacts:
+                contact = Contact(
+                    profile_id=prof.id,
+                    name=cdata["name"],
+                    email=cdata["email"],
+                )
+                db.add(contact)
+                db.flush()
+                if cdata["phone"]:
+                    db.add(ContactPhone(contact_id=contact.id, type=PhoneType.work, number=cdata["phone"]))
+            pending_contacts.clear()
 
             counts["vendors"] = count
 
@@ -351,6 +419,8 @@ async def import_legacy_data(
             rows = parse_csv(file_contents["tblMaterial.csv"])
             count = 0
             skipped_lm = 0
+            batch: list[tuple[int, Part]] = []
+
             for row in rows:
                 legacy_id = safe_int(row.get("ProductID", ""))
                 part_number = safe_str(row.get("chrProductName", ""))
@@ -378,10 +448,13 @@ async def import_legacy_data(
                     vendor_id=vendor_map.get(vendor_legacy_id),
                 )
                 db.add(part)
-                db.flush()
-                part_map[legacy_id] = part.id
+                batch.append((legacy_id, part))
                 count += 1
 
+                if len(batch) >= BATCH_SIZE:
+                    flush_batch(db, batch, part_map)
+
+            flush_batch(db, batch, part_map)
             if skipped_lm:
                 warnings.append(f"Parts: skipped {skipped_lm} LM- prefix rows")
             counts["parts"] = count
@@ -390,6 +463,8 @@ async def import_legacy_data(
         if "tblApplication.csv" in file_contents:
             rows = parse_csv(file_contents["tblApplication.csv"])
             count = 0
+            batch: list[tuple[int, Labor]] = []
+
             for row in rows:
                 legacy_id = safe_int(row.get("ProductID", ""))
                 description = safe_str(row.get("chrProductDescription", ""))
@@ -418,16 +493,21 @@ async def import_legacy_data(
                     category_id=cat_map_labor.get(cat_legacy_id),
                 )
                 db.add(labor_item)
-                db.flush()
-                labor_map[legacy_id] = labor_item.id
+                batch.append((legacy_id, labor_item))
                 count += 1
 
+                if len(batch) >= BATCH_SIZE:
+                    flush_batch(db, batch, labor_map)
+
+            flush_batch(db, batch, labor_map)
             counts["labor"] = count
 
         # === 6. Miscellaneous (tblZones) ===
         if "tblZones.csv" in file_contents:
             rows = parse_csv(file_contents["tblZones.csv"])
             count = 0
+            batch: list[tuple[int, Miscellaneous]] = []
+
             for row in rows:
                 legacy_id = safe_int(row.get("ZoneRateID", ""))
 
@@ -456,16 +536,20 @@ async def import_legacy_data(
                     is_system_item=False,
                 )
                 db.add(misc)
-                db.flush()
-                misc_map[legacy_id] = misc.id
+                batch.append((legacy_id, misc))
                 count += 1
 
+                if len(batch) >= BATCH_SIZE:
+                    flush_batch(db, batch, misc_map)
+
+            flush_batch(db, batch, misc_map)
             counts["miscellaneous"] = count
 
         # === 7. Projects (tblProjects) ===
         if "tblProjects.csv" in file_contents:
             rows = parse_csv(file_contents["tblProjects.csv"])
             count = 0
+            batch: list[tuple[int, Project]] = []
             # Track UCA numbers to handle duplicates
             seen_uca: set[str] = set()
 
@@ -482,9 +566,14 @@ async def import_legacy_data(
                     warnings.append(f"Projects: skipped ProjectID {legacy_id} — unknown ClientID {client_legacy_id}")
                     continue
 
-                uca_number = safe_str(row.get("UCAProjectNr", ""))
-                if not uca_number:
-                    uca_number = str(legacy_id)
+                # Legacy system stores numeric UCA, display format is "A" + 4-digit padded
+                uca_raw = safe_str(row.get("UCAProjectNr", ""))
+                if not uca_raw:
+                    uca_raw = str(legacy_id)
+                try:
+                    uca_number = f"A{int(uca_raw):04d}"
+                except ValueError:
+                    uca_number = uca_raw  # Already has prefix or non-numeric
 
                 # Handle duplicate UCA numbers
                 if uca_number in seen_uca:
@@ -505,10 +594,13 @@ async def import_legacy_data(
                     project_lead=safe_str(row.get("EmployeeID", "")) or None,
                 )
                 db.add(project)
-                db.flush()
-                project_map[legacy_id] = project.id
+                batch.append((legacy_id, project))
                 count += 1
 
+                if len(batch) >= BATCH_SIZE:
+                    flush_batch(db, batch, project_map)
+
+            flush_batch(db, batch, project_map)
             counts["projects"] = count
 
         # === 8. Quotes (tblServiceRecords) ===
@@ -535,6 +627,7 @@ async def import_legacy_data(
                 project_quotes.setdefault(project_legacy_id, []).append(row)
 
             # Sort each group and assign sequences
+            batch: list[tuple[int, Quote]] = []
             for proj_legacy_id, quote_rows in project_quotes.items():
                 # Sort by date then by WorkorderID
                 def sort_key(r):
@@ -557,10 +650,13 @@ async def import_legacy_data(
                         current_version=0,
                     )
                     db.add(quote)
-                    db.flush()
-                    quote_map[legacy_wo_id] = quote.id
+                    batch.append((legacy_wo_id, quote))
                     count += 1
 
+                    if len(batch) >= BATCH_SIZE:
+                        flush_batch(db, batch, quote_map)
+
+            flush_batch(db, batch, quote_map)
             counts["quotes"] = count
 
         # === 9. Quote Labor Items (tblWorkorderApplication) ===
@@ -658,6 +754,12 @@ async def import_legacy_data(
             rows = parse_csv(file_contents["tblPurchaseOrders.csv"])
             count = 0
 
+            # Create placeholder vendor for POs with missing vendor references
+            placeholder_vendor = Profile(name="Unknown Vendor (Legacy)", type=ProfileType.vendor)
+            db.add(placeholder_vendor)
+            db.flush()
+            placeholder_vendor_id = placeholder_vendor.id
+
             # Group by project for sequence assignment
             project_pos: dict[int, list[dict]] = {}
             for row in rows:
@@ -674,14 +776,17 @@ async def import_legacy_data(
 
                 vendor_legacy_id = safe_int(row.get("intVendorID", ""))
                 if vendor_legacy_id not in vendor_map:
-                    warnings.append(f"POs: skipped POID {legacy_po_id} — unknown intVendorID {vendor_legacy_id}")
-                    continue
+                    # Use placeholder instead of skipping
+                    if 0 not in vendor_map:
+                        vendor_map[0] = placeholder_vendor_id
+                    vendor_legacy_id = 0
 
                 row["_legacy_po_id"] = str(legacy_po_id)
                 row["_proj_legacy_id"] = str(proj_legacy_id)
                 row["_vendor_legacy_id"] = str(vendor_legacy_id)
                 project_pos.setdefault(proj_legacy_id, []).append(row)
 
+            batch: list[tuple[int, PurchaseOrder]] = []
             for proj_legacy_id, po_rows in project_pos.items():
                 def sort_key(r):
                     dt = parse_date(r.get("dtmOrderDate", "")) or datetime.min
@@ -704,10 +809,13 @@ async def import_legacy_data(
                         current_version=0,
                     )
                     db.add(po)
-                    db.flush()
-                    po_map[legacy_po_id] = po.id
+                    batch.append((legacy_po_id, po))
                     count += 1
 
+                    if len(batch) >= BATCH_SIZE:
+                        flush_batch(db, batch, po_map)
+
+            flush_batch(db, batch, po_map)
             counts["purchase_orders"] = count
 
         # === 13. PO Line Items (tblPurchaseOrdersMaterial) ===

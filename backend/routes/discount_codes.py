@@ -15,7 +15,7 @@ router = APIRouter(prefix="/discount-codes", tags=["discount-codes"])
 def get_all_discount_codes(
     include_archived: bool = False,
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 10000,
     db: Session = Depends(get_db)
 ):
     """Get all discount codes with optional archived filter."""

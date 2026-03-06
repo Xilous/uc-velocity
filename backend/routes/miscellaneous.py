@@ -13,7 +13,7 @@ router = APIRouter(prefix="/misc", tags=["miscellaneous"])
 
 
 @router.get("/", response_model=List[MiscellaneousSchema])
-def get_all_miscellaneous(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def get_all_miscellaneous(skip: int = 0, limit: int = 10000, db: Session = Depends(get_db)):
     """Get all miscellaneous items with pagination."""
     misc_items = db.query(Miscellaneous).offset(skip).limit(limit).all()
     return misc_items

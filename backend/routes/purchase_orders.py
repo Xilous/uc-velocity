@@ -271,7 +271,7 @@ router = APIRouter(prefix="/purchase-orders", tags=["purchase-orders"])
 
 
 @router.get("/", response_model=List[PurchaseOrderSchema])
-def get_all_purchase_orders(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def get_all_purchase_orders(skip: int = 0, limit: int = 10000, db: Session = Depends(get_db)):
     """Get all purchase orders."""
     pos = (
         db.query(PurchaseOrder)
