@@ -135,9 +135,12 @@ async def import_legacy_data(
 
     try:
         # === WIPE existing data ===
+        # Note: miscellaneous is NOT truncated — system items (Parking, Travel Distance)
+        # must survive. Non-system misc items are selectively deleted below.
         db.execute(text(
-            "TRUNCATE categories, profiles, parts, labor, miscellaneous, projects CASCADE"
+            "TRUNCATE categories, profiles, parts, labor, projects CASCADE"
         ))
+        db.execute(text("DELETE FROM miscellaneous WHERE is_system_item = false"))
 
         # Reset sequences
         sequences = [
@@ -147,7 +150,6 @@ async def import_legacy_data(
             "contact_phones_id_seq",
             "parts_id_seq",
             "labor_id_seq",
-            "miscellaneous_id_seq",
             "projects_id_seq",
             "quotes_id_seq",
             "quote_line_items_id_seq",
