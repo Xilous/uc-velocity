@@ -15,7 +15,8 @@ import type {
   MarkupControlToggleRequest, MarkupControlToggleResponse,
   CommitEditsRequest, CommitEditsResponse,
   CompanySettings, CompanySettingsUpdate, InvoiceSummaryItem,
-  BacklogQuoteItem, PricebookImportResult, MigrationResult
+  BacklogQuoteItem, PricebookImportResult, MigrationResult,
+  SystemRate, SystemRateCreate, SystemRateUpdate
 } from '@/types';
 
 // API base URL - configurable via environment variable for production
@@ -116,10 +117,25 @@ export const api = {
       request<Miscellaneous>(`/misc/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: number) =>
       request<{ message: string }>(`/misc/${id}`, { method: 'DELETE' }),
-    // System items
-    getSystemItems: () => request<Miscellaneous[]>('/misc/system-items/'),
-    getParkingItem: () => request<Miscellaneous>('/misc/system-items/parking'),
-    getTravelDistanceItems: () => request<Miscellaneous[]>('/misc/system-items/travel-distance'),
+  },
+
+  // ===== System Rates =====
+  systemRates: {
+    getParking: () => request<SystemRate>('/system-rates/parking'),
+    updateParking: (data: SystemRateUpdate) =>
+      request<SystemRate>('/system-rates/parking', { method: 'PUT', body: JSON.stringify(data) }),
+    getTravelDistance: () => request<SystemRate[]>('/system-rates/travel-distance'),
+    createTravelDistance: (data: SystemRateCreate) =>
+      request<SystemRate>('/system-rates/travel-distance', { method: 'POST', body: JSON.stringify(data) }),
+    updateTravelDistance: (id: number, data: SystemRateUpdate) =>
+      request<SystemRate>(`/system-rates/travel-distance/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteTravelDistance: (id: number) =>
+      request<SystemRate>(`/system-rates/travel-distance/${id}`, { method: 'DELETE' }),
+    getPmsDefault: () => request<{ default_pms_percent: number | null }>('/system-rates/pms-default'),
+    updatePmsDefault: (value: number | null) =>
+      request<{ default_pms_percent: number | null }>('/system-rates/pms-default', {
+        method: 'PUT', body: JSON.stringify({ default_pms_percent: value })
+      }),
   },
 
   // ===== Discount Codes =====

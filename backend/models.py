@@ -411,6 +411,22 @@ class QuoteSnapshot(Base):
     line_item_states = relationship("QuoteLineItemSnapshot", back_populates="snapshot", cascade="all, delete-orphan")
 
 
+class SystemRate(Base):
+    __tablename__ = "system_rates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    rate_type = Column(String, nullable=False)  # "parking" or "travel_distance"
+    description = Column(String, nullable=False)
+    unit_price = Column(Float, nullable=False)
+    markup_percent = Column(Float, nullable=False, default=0.0)
+    sort_order = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+    linked_misc_id = Column(Integer, ForeignKey('miscellaneous.id'), nullable=True)
+
+    # Relationships
+    linked_misc = relationship("Miscellaneous")
+
+
 class CompanySettings(Base):
     __tablename__ = "company_settings"
 
@@ -421,6 +437,7 @@ class CompanySettings(Base):
     fax = Column(String)
     gst_number = Column(String)
     hst_rate = Column(Float, default=13.0)
+    default_pms_percent = Column(Float, nullable=True)
 
 
 class QuoteLineItemSnapshot(Base):

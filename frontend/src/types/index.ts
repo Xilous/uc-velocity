@@ -9,6 +9,7 @@ export interface CompanySettings {
   fax?: string;
   gst_number?: string;
   hst_rate: number;
+  default_pms_percent?: number | null;
 }
 
 export interface CompanySettingsUpdate {
@@ -18,6 +19,33 @@ export interface CompanySettingsUpdate {
   fax?: string;
   gst_number?: string;
   hst_rate?: number;
+  default_pms_percent?: number | null;
+}
+
+// ===== System Rates =====
+export interface SystemRate {
+  id: number;
+  rate_type: 'parking' | 'travel_distance';
+  description: string;
+  unit_price: number;
+  markup_percent: number;
+  sort_order: number;
+  is_active: boolean;
+  linked_misc_id?: number;
+}
+
+export interface SystemRateCreate {
+  description: string;
+  unit_price: number;
+  markup_percent?: number;
+  sort_order?: number;
+}
+
+export interface SystemRateUpdate {
+  description?: string;
+  unit_price?: number;
+  markup_percent?: number;
+  sort_order?: number;
 }
 
 // ===== Invoice Summary (for Reports) =====

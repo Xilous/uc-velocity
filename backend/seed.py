@@ -3,7 +3,8 @@ Database seeding for system items and company settings.
 Run this at application startup to ensure system items exist.
 """
 from sqlalchemy.orm import Session
-from models import Miscellaneous, CompanySettings
+from sqlalchemy import inspect as sa_inspect
+from models import Miscellaneous, CompanySettings, SystemRate
 
 SYSTEM_MISC_ITEMS = [
     # Parking
@@ -91,3 +92,46 @@ def seed_system_items(db: Session) -> None:
         db.add(CompanySettings(**DEFAULT_COMPANY_SETTINGS))
 
     db.commit()
+
+    # Seed default_pms_percent on company_settings if NULL
+    settings = db.query(CompanySettings).first()
+    if settings and settings.default_pms_percent is None:
+        settings.default_pms_percent = 10.0
+        db.commit()
+
+    # Seed system_rates from misc items (if table exists and is empty)
+    inspector = sa_inspect(db.bind)
+    if 'system_rates' in inspector.get_table_names():
+        existing_rates = db.query(SystemRate).count()
+        if existing_rates == 0:
+            # Map descriptions to (rate_type, sort_order)
+            rate_map = {
+                "Parking (1 Hour)": ("parking", 0),
+                "Travel Distance (40km) (1 Day)": ("travel_distance", 1),
+                "Travel Distance (60km) (1 Day)": ("travel_distance", 2),
+                "Travel Distance (80km) (1 Day)": ("travel_distance", 3),
+                "Travel Distance (120km) (1 Day)": ("travel_distance", 4),
+                "Travel Distance (180km) (1 Day)": ("travel_distance", 5),
+                "Travel Distance (260km) (1 Day)": ("travel_distance", 6),
+                "Unlimited Travel Distance (1 Day)": ("travel_distance", 7),
+            }
+
+            misc_items = db.query(Miscellaneous).filter(
+                Miscellaneous.is_system_item == True
+            ).all()
+
+            for misc in misc_items:
+                mapping = rate_map.get(misc.description)
+                if mapping:
+                    rate_type, sort_order = mapping
+                    db.add(SystemRate(
+                        rate_type=rate_type,
+                        description=misc.description,
+                        unit_price=misc.unit_price,
+                        markup_percent=misc.markup_percent,
+                        sort_order=sort_order,
+                        is_active=True,
+                        linked_misc_id=misc.id,
+                    ))
+
+            db.commit()
