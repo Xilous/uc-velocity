@@ -15,7 +15,7 @@ router = APIRouter(prefix="/profiles", tags=["profiles"])
 @router.get("/", response_model=List[ProfileSchema])
 def get_all_profiles(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = None,  # No default limit until pagination is implemented
     profile_type: Optional[str] = Query(None, description="Filter by profile type (customer or vendor)"),
     db: Session = Depends(get_db)
 ):
