@@ -23,7 +23,7 @@ def auto_calculate_cost(part: Part, db: Session) -> None:
 
 
 @router.get("/", response_model=List[PartWithLabor])
-def get_all_parts(skip: int = 0, limit: int = 10000, db: Session = Depends(get_db)):
+def get_all_parts(skip: int = 0, limit: int = None, db: Session = Depends(get_db)):
     """Get all parts with their linked labor items."""
     parts = (
         db.query(Part)

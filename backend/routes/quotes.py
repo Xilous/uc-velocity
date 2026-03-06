@@ -278,7 +278,7 @@ router = APIRouter(prefix="/quotes", tags=["quotes"])
 
 
 @router.get("/", response_model=List[QuoteSchema])
-def get_all_quotes(skip: int = 0, limit: int = 10000, db: Session = Depends(get_db)):
+def get_all_quotes(skip: int = 0, limit: int = None, db: Session = Depends(get_db)):
     """Get all quotes."""
     quotes = (
         db.query(Quote)

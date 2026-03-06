@@ -79,7 +79,7 @@ def generate_next_uca_number(db: Session) -> str:
 
 
 @router.get("/", response_model=List[ProjectSchema])
-def get_all_projects(skip: int = 0, limit: int = 10000, db: Session = Depends(get_db)):
+def get_all_projects(skip: int = 0, limit: int = None, db: Session = Depends(get_db)):
     """Get all projects with customer info."""
     projects = (
         db.query(Project)

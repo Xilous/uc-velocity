@@ -10,7 +10,7 @@ router = APIRouter(prefix="/labor", tags=["labor"])
 
 
 @router.get("/", response_model=List[LaborSchema])
-def get_all_labor(skip: int = 0, limit: int = 10000, db: Session = Depends(get_db)):
+def get_all_labor(skip: int = 0, limit: int = None, db: Session = Depends(get_db)):
     """Get all labor items with pagination."""
     labor_items = db.query(Labor).offset(skip).limit(limit).all()
     return labor_items
