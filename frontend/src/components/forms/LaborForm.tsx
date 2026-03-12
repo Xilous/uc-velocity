@@ -105,8 +105,8 @@ export function LaborForm({ labor, onSuccess, onCancel }: LaborFormProps) {
           <Input
             id="hours"
             type="number"
-            step="0.25"
-            min="0.01"
+            step="any"
+            min="0"
             value={hours}
             onChange={(e) => setHours(e.target.value)}
             placeholder="1"
