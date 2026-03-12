@@ -7,7 +7,7 @@ import type { Labor, LaborCreate } from "@/types"
 
 interface LaborFormProps {
   labor?: Labor // If provided, we're editing; otherwise creating
-  onSuccess?: () => void
+  onSuccess?: (item?: Labor) => void
   onCancel?: () => void
 }
 
@@ -66,12 +66,13 @@ export function LaborForm({ labor, onSuccess, onCancel }: LaborFormProps) {
     }
 
     try {
+      let result: Labor | undefined
       if (isEditing && labor) {
-        await api.labor.update(labor.id, laborData)
+        result = await api.labor.update(labor.id, laborData)
       } else {
-        await api.labor.create(laborData)
+        result = await api.labor.create(laborData)
       }
-      onSuccess?.()
+      onSuccess?.(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : `Failed to ${isEditing ? 'update' : 'create'} labor`)
     } finally {
