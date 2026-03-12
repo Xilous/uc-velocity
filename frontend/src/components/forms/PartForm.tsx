@@ -17,7 +17,7 @@ import { LaborForm } from "./LaborForm"
 
 interface PartFormProps {
   part?: Part // If provided, we're editing; otherwise creating
-  onSuccess?: () => void
+  onSuccess?: (item?: Part) => void
   onCancel?: () => void
 }
 
@@ -128,12 +128,13 @@ export function PartForm({ part, onSuccess, onCancel }: PartFormProps) {
     }
 
     try {
+      let result: Part | undefined
       if (isEditing && part) {
-        await api.parts.update(part.id, partData)
+        result = await api.parts.update(part.id, partData)
       } else {
-        await api.parts.create(partData)
+        result = await api.parts.create(partData)
       }
-      onSuccess?.()
+      onSuccess?.(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : `Failed to ${isEditing ? 'update' : 'create'} part`)
     } finally {

@@ -7,7 +7,7 @@ import type { Miscellaneous, MiscellaneousCreate } from "@/types"
 
 interface MiscFormProps {
   misc?: Miscellaneous // If provided, we're editing; otherwise creating
-  onSuccess?: () => void
+  onSuccess?: (item?: Miscellaneous) => void
   onCancel?: () => void
 }
 
@@ -48,12 +48,13 @@ export function MiscForm({ misc, onSuccess, onCancel }: MiscFormProps) {
     }
 
     try {
+      let result: Miscellaneous | undefined
       if (isEditing && misc) {
-        await api.misc.update(misc.id, miscData)
+        result = await api.misc.update(misc.id, miscData)
       } else {
-        await api.misc.create(miscData)
+        result = await api.misc.create(miscData)
       }
-      onSuccess?.()
+      onSuccess?.(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : `Failed to ${isEditing ? 'update' : 'create'} miscellaneous item`)
     } finally {
