@@ -145,15 +145,6 @@ class CostCode(Base):
     uch_dept_properties = Column(String, nullable=True)
 
 
-class DiscountCode(Base):
-    __tablename__ = "discount_codes"
-
-    id = Column(Integer, primary_key=True, index=True)
-    code = Column(String(10), unique=True, nullable=False)
-    discount_percent = Column(Float, nullable=False)  # Stored as decimal (e.g., 10.00)
-    is_archived = Column(Boolean, default=False)
-
-
 class Project(Base):
     __tablename__ = "projects"
 
@@ -209,7 +200,6 @@ class QuoteLineItem(Base):
     labor_id = Column(Integer, ForeignKey('labor.id'), nullable=True)
     part_id = Column(Integer, ForeignKey('parts.id'), nullable=True)
     misc_id = Column(Integer, ForeignKey('miscellaneous.id'), nullable=True)
-    discount_code_id = Column(Integer, ForeignKey('discount_codes.id'), nullable=True)
     description = Column(String)  # For misc items or override
     quantity = Column(Integer, default=1)  # Qty Ordered (must be whole number)
     unit_price = Column(Float)  # Override price if needed
@@ -226,7 +216,6 @@ class QuoteLineItem(Base):
     labor = relationship("Labor")
     part = relationship("Part")
     miscellaneous = relationship("Miscellaneous")
-    discount_code = relationship("DiscountCode")
 
 
 class PurchaseOrder(Base):
@@ -387,7 +376,6 @@ class InvoiceLineItem(Base):
     labor_id = Column(Integer)
     part_id = Column(Integer)
     misc_id = Column(Integer)
-    discount_code_id = Column(Integer)
 
     # Relationships
     invoice = relationship("Invoice", back_populates="line_items")
@@ -452,7 +440,6 @@ class QuoteLineItemSnapshot(Base):
     labor_id = Column(Integer)
     part_id = Column(Integer)
     misc_id = Column(Integer)
-    discount_code_id = Column(Integer)
     description = Column(String)
     quantity = Column(Integer)  # qty_ordered (must be whole number)
     unit_price = Column(Float)

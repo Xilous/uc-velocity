@@ -8,7 +8,6 @@ import {
   getEffectiveLineItemTotal,
   calculateNonPmsTotal,
   calculateQuoteTotal,
-  calculateTotalDiscount,
   formatCurrency,
 } from '@/lib/pricing'
 import type { Quote, QuoteLineItem, Project, CompanySettings } from '@/types'
@@ -68,7 +67,6 @@ function LineItemTable({
           >
             <Text style={styles.colDescription}>
               {description}
-              {item.discount_code ? ` (${item.discount_code.code} -${item.discount_code.discount_percent}%)` : ''}
               {item.is_pms && item.pms_percent != null ? ` (PMS ${item.pms_percent}%)` : ''}
             </Text>
             <Text style={styles.colQty}>{item.quantity}</Text>
@@ -103,12 +101,10 @@ export function QuotePDF({ quote, project, companySettings }: QuotePDFProps) {
   const miscItems = quote.line_items.filter(i => i.item_type === 'misc')
 
   const nonPmsTotal = calculateNonPmsTotal(quote.line_items)
-  const subtotalAfterDiscount = calculateQuoteTotal(quote.line_items)
-  const totalDiscount = calculateTotalDiscount(quote.line_items, nonPmsTotal)
-  const subtotalBeforeDiscount = subtotalAfterDiscount + totalDiscount
+  const subtotal = calculateQuoteTotal(quote.line_items)
   const hstRate = companySettings.hst_rate ?? 13.0
-  const hstAmount = subtotalAfterDiscount * (hstRate / 100)
-  const grandTotal = subtotalAfterDiscount + hstAmount
+  const hstAmount = subtotal * (hstRate / 100)
+  const grandTotal = subtotal + hstAmount
 
   const formattedDate = new Date(quote.created_at).toLocaleDateString('en-CA', {
     day: '2-digit',
@@ -180,14 +176,8 @@ export function QuotePDF({ quote, project, companySettings }: QuotePDFProps) {
         <View style={styles.totalsBlock}>
           <View style={styles.totalsRow}>
             <Text style={[styles.totalsLabel, styles.bold]}>SUBTOTAL:</Text>
-            <Text style={styles.totalsValue}>{formatCurrency(subtotalBeforeDiscount)}</Text>
+            <Text style={styles.totalsValue}>{formatCurrency(subtotal)}</Text>
           </View>
-          {totalDiscount > 0 && (
-            <View style={styles.totalsRow}>
-              <Text style={styles.totalsLabel}>Discount:</Text>
-              <Text style={styles.totalsValue}>-{formatCurrency(totalDiscount)}</Text>
-            </View>
-          )}
           {hstRate > 0 && (
             <View style={styles.totalsRow}>
               <Text style={styles.totalsLabel}>HST ({hstRate}%):</Text>

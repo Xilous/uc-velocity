@@ -30,7 +30,6 @@ describe('Backlog Report - Excel generation', () => {
               qty_fulfilled: 4,
               qty_pending: 6,
               unit_price: 500,
-              discount_percent: 0,
               backlog_value: 3000,
             },
           ],

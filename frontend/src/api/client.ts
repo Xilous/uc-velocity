@@ -2,7 +2,6 @@ import type {
   Part, PartCreate,
   Labor, LaborCreate,
   Miscellaneous, MiscellaneousCreate,
-  DiscountCode, DiscountCodeCreate,
   CostCode, CostCodeCreate, CostCodeUpdate,
   Profile, ProfileCreate, ProfileUpdate, ProfileType,
   Contact, ContactCreate, ContactUpdate,
@@ -136,21 +135,6 @@ export const api = {
       request<{ default_pms_percent: number | null }>('/system-rates/pms-default', {
         method: 'PUT', body: JSON.stringify({ default_pms_percent: value })
       }),
-  },
-
-  // ===== Discount Codes =====
-  discountCodes: {
-    getAll: (includeArchived = false) =>
-      request<DiscountCode[]>(`/discount-codes/?include_archived=${includeArchived}`),
-    get: (id: number) => request<DiscountCode>(`/discount-codes/${id}`),
-    create: (data: DiscountCodeCreate) =>
-      request<DiscountCode>('/discount-codes/', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: number, data: Partial<DiscountCode>) =>
-      request<DiscountCode>(`/discount-codes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-    archive: (id: number) =>
-      request<DiscountCode>(`/discount-codes/${id}/archive`, { method: 'PUT' }),
-    delete: (id: number) =>
-      request<{ message: string }>(`/discount-codes/${id}`, { method: 'DELETE' }),
   },
 
   // ===== Quotes =====

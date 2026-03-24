@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from database import get_db
 from models import (
-    Quote, QuoteLineItem, Project, Labor, Part, Miscellaneous, DiscountCode,
+    Quote, QuoteLineItem, Project, Labor, Part, Miscellaneous,
     QuoteSnapshot, QuoteLineItemSnapshot, Invoice, InvoiceLineItem, CostCode
 )
 from datetime import datetime
@@ -70,7 +70,6 @@ def create_snapshot(
             labor_id=item.labor_id,
             part_id=item.part_id,
             misc_id=item.misc_id,
-            discount_code_id=item.discount_code_id,
             description=item.description,
             quantity=item.quantity,
             unit_price=item.unit_price,
@@ -305,7 +304,6 @@ def get_quote(quote_id: int, db: Session = Depends(get_db)):
             joinedload(Quote.line_items).joinedload(QuoteLineItem.labor),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.part),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous),
-            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code),
             joinedload(Quote.cost_code)
         )
         .filter(Quote.id == quote_id)
@@ -445,7 +443,6 @@ def clone_quote(quote_id: int, db: Session = Depends(get_db)):
             labor_id=item.labor_id,
             part_id=item.part_id,
             misc_id=item.misc_id,
-            discount_code_id=item.discount_code_id,
             description=item.description,
             quantity=item.quantity,
             unit_price=item.unit_price,
@@ -468,7 +465,6 @@ def clone_quote(quote_id: int, db: Session = Depends(get_db)):
             joinedload(Quote.line_items).joinedload(QuoteLineItem.labor),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.part),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous),
-            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code),
             joinedload(Quote.cost_code)
         )
         .filter(Quote.id == new_quote.id)
@@ -479,7 +475,7 @@ def clone_quote(quote_id: int, db: Session = Depends(get_db)):
     return populate_quote_number(new_quote, project.uca_project_number)
 
 
-# ==================== Markup Discount Control ====================
+# ==================== Markup Control ====================
 
 def _get_section_markup(item_type: str, request: MarkupControlToggleRequest) -> float:
     """Get the appropriate section-level markup % for a line item type."""
@@ -510,10 +506,9 @@ def toggle_markup_control(
     db: Session = Depends(get_db)
 ):
     """
-    Toggle the Markup Discount Control feature for a quote.
+    Toggle the Markup Control feature for a quote.
 
     When enabling (request.enabled=True):
-    - Validates no discount codes are applied to any line items
     - Requires section-level markup percentages (parts/labor/misc)
     - Stores original markups and base costs for each line item
     - Recalculates all unit_prices using the section-appropriate markup
@@ -582,17 +577,6 @@ def toggle_markup_control(
 
         else:
             # ENABLE MODE: First time enabling
-            # Validate: No discount codes applied
-            lines_with_discounts = [
-                item for item in quote.line_items
-                if item.discount_code_id is not None
-            ]
-            if lines_with_discounts:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Remove discount codes first to enable this feature"
-                )
-
             # Enable markup control with section-level percents
             quote.markup_control_enabled = True
             quote.parts_markup_percent = request.parts_markup_percent or 0
@@ -661,8 +645,7 @@ def toggle_markup_control(
         .options(
             joinedload(Quote.line_items).joinedload(QuoteLineItem.labor),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.part),
-            joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous),
-            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code)
+            joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous)
         )
         .filter(Quote.id == quote_id)
         .first()
@@ -689,8 +672,7 @@ def get_quote_lines(quote_id: int, db: Session = Depends(get_db)):
         .options(
             joinedload(QuoteLineItem.labor),
             joinedload(QuoteLineItem.part),
-            joinedload(QuoteLineItem.miscellaneous),
-            joinedload(QuoteLineItem.discount_code)
+            joinedload(QuoteLineItem.miscellaneous)
         )
         .filter(QuoteLineItem.quote_id == quote_id)
         .all()
@@ -749,28 +731,12 @@ def add_quote_line(quote_id: int, line_data: QuoteLineItemCreate, db: Session = 
         elif not line_data.description:
             raise HTTPException(status_code=400, detail="misc_id or description required for misc line items")
 
-    # Validate discount code if provided
-    if line_data.discount_code_id:
-        # Block discount codes when markup control is enabled
-        if quote.markup_control_enabled:
-            raise HTTPException(
-                status_code=400,
-                detail="Cannot apply discount codes while Markup Discount Control is enabled"
-            )
-        discount_code = db.query(DiscountCode).filter(
-            DiscountCode.id == line_data.discount_code_id,
-            DiscountCode.is_archived == False
-        ).first()
-        if not discount_code:
-            raise HTTPException(status_code=400, detail="Discount code not found or is archived")
-
     db_line = QuoteLineItem(
         quote_id=quote_id,
         item_type=line_data.item_type,
         labor_id=line_data.labor_id,
         part_id=line_data.part_id,
         misc_id=line_data.misc_id,
-        discount_code_id=line_data.discount_code_id,
         description=line_data.description,
         quantity=line_data.quantity,
         unit_price=line_data.unit_price,
@@ -809,8 +775,7 @@ def add_quote_line(quote_id: int, line_data: QuoteLineItemCreate, db: Session = 
         .options(
             joinedload(QuoteLineItem.labor),
             joinedload(QuoteLineItem.part),
-            joinedload(QuoteLineItem.miscellaneous),
-            joinedload(QuoteLineItem.discount_code)
+            joinedload(QuoteLineItem.miscellaneous)
         )
         .filter(QuoteLineItem.id == db_line.id)
         .first()
@@ -825,7 +790,7 @@ def update_quote_line(
     line_data: QuoteLineItemUpdate,
     db: Session = Depends(get_db)
 ):
-    """Update a line item (quantity, unit_price, discount_code)."""
+    """Update a line item (quantity, unit_price)."""
     # Get quote for snapshot
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
@@ -863,30 +828,6 @@ def update_quote_line(
             changes.append(f"unit_price: ${db_line.unit_price or 0:.2f} → ${line_data.unit_price:.2f}")
         db_line.unit_price = line_data.unit_price
 
-    # Handle discount code update
-    if line_data.discount_code_id is not None:
-        if line_data.discount_code_id == 0:
-            if db_line.discount_code_id:
-                changes.append("removed discount code")
-            db_line.discount_code_id = None
-        else:
-            # Block discount codes when markup control is enabled
-            if quote.markup_control_enabled:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Cannot apply discount codes while Markup Discount Control is enabled"
-                )
-            # Validate discount code exists and is not archived
-            discount_code = db.query(DiscountCode).filter(
-                DiscountCode.id == line_data.discount_code_id,
-                DiscountCode.is_archived == False
-            ).first()
-            if not discount_code:
-                raise HTTPException(status_code=400, detail="Discount code not found or is archived")
-            if db_line.discount_code_id != line_data.discount_code_id:
-                changes.append(f"applied discount: {discount_code.code}")
-            db_line.discount_code_id = line_data.discount_code_id
-
     # Create snapshot if there were actual changes
     if changes:
         item_desc = get_line_item_description(db_line, db)
@@ -906,8 +847,7 @@ def update_quote_line(
         .options(
             joinedload(QuoteLineItem.labor),
             joinedload(QuoteLineItem.part),
-            joinedload(QuoteLineItem.miscellaneous),
-            joinedload(QuoteLineItem.discount_code)
+            joinedload(QuoteLineItem.miscellaneous)
         )
         .filter(QuoteLineItem.id == db_line.id)
         .first()
@@ -965,7 +905,6 @@ def delete_quote_line(quote_id: int, line_id: int, db: Session = Depends(get_db)
             labor_id=item.labor_id,
             part_id=item.part_id,
             misc_id=item.misc_id,
-            discount_code_id=item.discount_code_id,
             description=item.description,
             quantity=item.quantity,
             unit_price=item.unit_price,
@@ -999,7 +938,7 @@ def commit_edits(
 
     This endpoint handles batch operations for the Edit Mode workflow:
     - Adds: Create new line items
-    - Edits: Update existing line items (quantity, price, discount, etc.)
+    - Edits: Update existing line items (quantity, price, etc.)
     - Deletes: Remove line items
 
     All changes are validated and applied atomically, then a single snapshot
@@ -1068,20 +1007,6 @@ def commit_edits(
                 elif not change.description:
                     raise HTTPException(status_code=400, detail="misc_id or description required for misc items")
 
-            # Validate discount code if provided
-            if change.discount_code_id:
-                if quote.markup_control_enabled:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Cannot apply discount codes while Markup Discount Control is enabled"
-                    )
-                discount = db.query(DiscountCode).filter(
-                    DiscountCode.id == change.discount_code_id,
-                    DiscountCode.is_archived == False
-                ).first()
-                if not discount:
-                    raise HTTPException(status_code=400, detail="Discount code not found or archived")
-
             # Create the new line item
             quantity = change.quantity or 1
             new_item = QuoteLineItem(
@@ -1090,7 +1015,6 @@ def commit_edits(
                 labor_id=change.labor_id,
                 part_id=change.part_id,
                 misc_id=change.misc_id,
-                discount_code_id=change.discount_code_id,
                 description=change.description,
                 quantity=quantity,
                 unit_price=change.unit_price,
@@ -1157,29 +1081,6 @@ def commit_edits(
             if change.unit_price is not None and change.unit_price != line_item.unit_price:
                 item_changes.append(f"price: ${line_item.unit_price or 0:.2f} → ${change.unit_price:.2f}")
                 line_item.unit_price = change.unit_price
-
-            # Update discount code if provided
-            if change.discount_code_id is not None:
-                if change.discount_code_id == 0:
-                    # Remove discount code
-                    if line_item.discount_code_id:
-                        item_changes.append("removed discount")
-                    line_item.discount_code_id = None
-                else:
-                    if quote.markup_control_enabled:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Cannot apply discount codes while Markup Discount Control is enabled"
-                        )
-                    discount = db.query(DiscountCode).filter(
-                        DiscountCode.id == change.discount_code_id,
-                        DiscountCode.is_archived == False
-                    ).first()
-                    if not discount:
-                        raise HTTPException(status_code=400, detail="Discount code not found or archived")
-                    if line_item.discount_code_id != change.discount_code_id:
-                        item_changes.append(f"discount: {discount.code}")
-                    line_item.discount_code_id = change.discount_code_id
 
             # Update description if provided
             if change.description is not None and change.description != line_item.description:
@@ -1266,7 +1167,6 @@ def commit_edits(
             joinedload(Quote.line_items).joinedload(QuoteLineItem.labor),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.part),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous),
-            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code),
             joinedload(Quote.cost_code)
         )
         .filter(Quote.id == quote_id)
@@ -1382,8 +1282,7 @@ def create_invoice(
             qty_pending_after=line_item.qty_pending - fulfill_qty,
             labor_id=line_item.labor_id,
             part_id=line_item.part_id,
-            misc_id=line_item.misc_id,
-            discount_code_id=line_item.discount_code_id
+            misc_id=line_item.misc_id
         )
         db.add(invoice_line)
 
@@ -1551,7 +1450,6 @@ def revert_to_snapshot(quote_id: int, version: int, db: Session = Depends(get_db
                 labor_id=item_state.labor_id,
                 part_id=item_state.part_id,
                 misc_id=item_state.misc_id,
-                discount_code_id=item_state.discount_code_id,
                 description=item_state.description,
                 quantity=item_state.quantity,
                 unit_price=item_state.unit_price,
@@ -1592,7 +1490,6 @@ def revert_to_snapshot(quote_id: int, version: int, db: Session = Depends(get_db
             labor_id=item.labor_id,
             part_id=item.part_id,
             misc_id=item.misc_id,
-            discount_code_id=item.discount_code_id,
             description=item.description,
             quantity=item.quantity,
             unit_price=item.unit_price,
@@ -1617,7 +1514,6 @@ def revert_to_snapshot(quote_id: int, version: int, db: Session = Depends(get_db
             joinedload(Quote.line_items).joinedload(QuoteLineItem.labor),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.part),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous),
-            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code),
             joinedload(Quote.cost_code)
         )
         .filter(Quote.id == quote_id)

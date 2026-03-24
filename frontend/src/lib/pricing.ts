@@ -33,18 +33,14 @@ export function getLineItemUnitPrice(item: QuoteLineItem): number {
   return 0
 }
 
-/** Unit price * quantity (before discount). */
+/** Unit price * quantity. */
 export function getLineItemSubtotal(item: QuoteLineItem): number {
   return getLineItemUnitPrice(item) * item.quantity
 }
 
-/** Subtotal after applying the line-item discount code (if any). */
+/** Line item total (unit price * quantity). */
 export function getLineItemTotal(item: QuoteLineItem): number {
-  const subtotal = getLineItemSubtotal(item)
-  if (item.discount_code) {
-    return subtotal * (1 - item.discount_code.discount_percent / 100)
-  }
-  return subtotal
+  return getLineItemSubtotal(item)
 }
 
 /** Sum of totals for all non-PMS line items (the base for PMS % calculations). */
@@ -65,25 +61,17 @@ export function getEffectiveUnitPrice(item: QuoteLineItem, nonPmsTotal: number):
   return getLineItemUnitPrice(item)
 }
 
-/** Effective total using the PMS-aware unit price, with discount applied. */
+/** Effective total using the PMS-aware unit price. */
 export function getEffectiveLineItemTotal(item: QuoteLineItem, nonPmsTotal: number): number {
   const unitPrice = getEffectiveUnitPrice(item, nonPmsTotal)
-  const subtotal = unitPrice * item.quantity
-  if (item.discount_code) {
-    return subtotal * (1 - item.discount_code.discount_percent / 100)
-  }
-  return subtotal
+  return unitPrice * item.quantity
 }
 
 /** Value of already-fulfilled quantity for a line item. */
 export function getFulfilledLineItemValue(item: QuoteLineItem, nonPmsTotal: number): number {
   if (item.qty_fulfilled === 0) return 0
   const unitPrice = getEffectiveUnitPrice(item, nonPmsTotal)
-  let total = unitPrice * item.qty_fulfilled
-  if (item.discount_code) {
-    total = total * (1 - item.discount_code.discount_percent / 100)
-  }
-  return total
+  return unitPrice * item.qty_fulfilled
 }
 
 /** Aggregate statistics for a section of line items. */
@@ -112,28 +100,11 @@ export function calculateQuoteTotal(lineItems: QuoteLineItem[]): number {
     .reduce((sum, item) => {
       if (item.pms_percent != null) {
         const unitPrice = nonPmsTotal * item.pms_percent / 100
-        let subtotal = unitPrice * item.quantity
-        if (item.discount_code) {
-          subtotal = subtotal * (1 - item.discount_code.discount_percent / 100)
-        }
-        return sum + subtotal
+        return sum + unitPrice * item.quantity
       }
       return sum + getLineItemTotal(item)
     }, 0)
   return nonPmsTotal + pmsTotal
-}
-
-/** Sum of all discount amounts across line items. */
-export function calculateTotalDiscount(lineItems: QuoteLineItem[], nonPmsTotal: number): number {
-  return lineItems.reduce((sum, item) => {
-    if (!item.discount_code) return sum
-    const unitPrice = item.is_pms && item.pms_percent != null
-      ? nonPmsTotal * item.pms_percent / 100
-      : getLineItemUnitPrice(item)
-    const subtotal = unitPrice * item.quantity
-    const discountAmount = subtotal * (item.discount_code.discount_percent / 100)
-    return sum + discountAmount
-  }, 0)
 }
 
 /** Format a number as currency with 2 decimal places. */

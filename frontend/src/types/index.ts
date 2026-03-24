@@ -57,7 +57,6 @@ export interface InvoiceSummaryItem {
   customer_name: string;
   client_po_number?: string;
   net_sales: number;
-  discount_total: number;
   hst_amount: number;
   grand_total: number;
 }
@@ -71,7 +70,6 @@ export interface BacklogLineItem {
   qty_fulfilled: number;
   qty_pending: number;
   unit_price: number;
-  discount_percent: number;
   backlog_value: number;
 }
 
@@ -170,19 +168,6 @@ export interface MiscellaneousCreate {
   unit_price: number;
   markup_percent: number;
   category_id?: number;
-}
-
-// ===== Discount Codes =====
-export interface DiscountCode {
-  id: number;
-  code: string;
-  discount_percent: number;
-  is_archived: boolean;
-}
-
-export interface DiscountCodeCreate {
-  code: string;
-  discount_percent: number;
 }
 
 // ===== Contact Phone =====
@@ -304,7 +289,6 @@ export interface QuoteLineItem {
   labor_id?: number;
   part_id?: number;
   misc_id?: number;
-  discount_code_id?: number;
   description?: string;
   quantity: number;  // Qty Ordered
   unit_price?: number;
@@ -318,7 +302,6 @@ export interface QuoteLineItem {
   labor?: Labor;
   part?: Part;
   miscellaneous?: Miscellaneous;
-  discount_code?: DiscountCode;
 }
 
 export interface QuoteLineItemCreate {
@@ -326,7 +309,6 @@ export interface QuoteLineItemCreate {
   labor_id?: number;
   part_id?: number;
   misc_id?: number;
-  discount_code_id?: number;
   description?: string;
   quantity: number;
   unit_price?: number;
@@ -337,7 +319,6 @@ export interface QuoteLineItemCreate {
 export interface QuoteLineItemUpdate {
   quantity?: number;
   unit_price?: number;
-  discount_code_id?: number;
 }
 
 // ===== Quotes =====
@@ -356,7 +337,7 @@ export interface Quote {
   current_version: number;
   client_po_number?: string | null;
   work_description?: string | null;
-  markup_control_enabled: boolean;  // Markup Discount Control toggle
+  markup_control_enabled: boolean;  // Markup Control toggle
   parts_markup_percent?: number | null;  // Section-level markup for parts
   labor_markup_percent?: number | null;  // Section-level markup for labor
   misc_markup_percent?: number | null;  // Section-level markup for misc
@@ -581,7 +562,6 @@ export interface InvoiceLineItem {
   labor_id?: number;
   part_id?: number;
   misc_id?: number;
-  discount_code_id?: number;
 }
 
 // ===== Invoices =====
@@ -621,7 +601,6 @@ export interface QuoteLineItemSnapshot {
   labor_id?: number;
   part_id?: number;
   misc_id?: number;
-  discount_code_id?: number;
   description?: string;
   quantity: number;
   unit_price?: number;
@@ -703,7 +682,6 @@ export interface StagedLineItemChange {
   labor_id?: number;
   part_id?: number;
   misc_id?: number;
-  discount_code_id?: number;
   description?: string;
   quantity?: number;
   unit_price?: number;
@@ -735,7 +713,6 @@ export interface StagedEdit {
   originalItem: QuoteLineItem;  // Reference to the original item for comparison
   quantity?: number;
   unit_price?: number;
-  discount_code_id?: number | null;  // null means "remove discount"
   description?: string;
   markup_percent?: number;
 }
@@ -750,7 +727,6 @@ export interface StagedAdd {
   labor_id?: number;
   part_id?: number;
   misc_id?: number;
-  discount_code_id?: number;
   description?: string;
   quantity: number;
   unit_price?: number;
@@ -760,5 +736,4 @@ export interface StagedAdd {
   labor?: Labor;
   part?: Part;
   miscellaneous?: Miscellaneous;
-  discount_code?: DiscountCode;
 }

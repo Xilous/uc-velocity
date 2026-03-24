@@ -19,7 +19,7 @@ export function generateBacklogExcel(data: BacklogQuoteItem[]): void {
   const headerRow = [
     'Quote #', 'UCA Project #', 'Customer', 'Project', 'Client PO',
     'Status', 'Item Type', 'Description', 'Qty Ordered', 'Qty Fulfilled',
-    'Qty Pending', 'Unit Price', 'Discount %', 'Backlog Value',
+    'Qty Pending', 'Unit Price', 'Backlog Value',
   ]
   rows.push(headerRow)
 
@@ -44,7 +44,6 @@ export function generateBacklogExcel(data: BacklogQuoteItem[]): void {
       '', // qty fulfilled
       '', // qty pending
       '', // unit price
-      '', // discount
       quote.backlog_total,
     ])
 
@@ -66,7 +65,6 @@ export function generateBacklogExcel(data: BacklogQuoteItem[]): void {
         li.qty_fulfilled,
         li.qty_pending,
         li.unit_price,
-        li.discount_percent,
         li.backlog_value,
       ])
     }
@@ -76,7 +74,7 @@ export function generateBacklogExcel(data: BacklogQuoteItem[]): void {
 
   // Grand total row
   rows.push([
-    '', '', '', '', '', '', '', '', '', '', '', '', 'Grand Total',
+    '', '', '', '', '', '', '', '', '', '', '', 'Grand Total',
     grandTotal,
   ])
 
@@ -97,7 +95,6 @@ export function generateBacklogExcel(data: BacklogQuoteItem[]): void {
     { wch: 12 }, // Qty Fulfilled
     { wch: 11 }, // Qty Pending
     { wch: 12 }, // Unit Price
-    { wch: 11 }, // Discount %
     { wch: 14 }, // Backlog Value
   ]
 
@@ -113,7 +110,7 @@ export function generateBacklogExcel(data: BacklogQuoteItem[]): void {
 
   // Format currency columns (Unit Price and Backlog Value) as number with 2 decimals
   const numFmt = '#,##0.00'
-  const currencyCols = [11, 13] // 0-indexed: Unit Price (K), Backlog Value (N)
+  const currencyCols = [11, 12] // 0-indexed: Unit Price (L), Backlog Value (M)
   for (let r = 1; r < rows.length; r++) {
     for (const c of currencyCols) {
       const cellRef = XLSX.utils.encode_cell({ r, c })

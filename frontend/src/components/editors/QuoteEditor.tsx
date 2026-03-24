@@ -51,11 +51,11 @@ import type { SearchableSelectOption } from "@/components/ui/searchable-select"
 import { api } from "@/api/client"
 import type {
   Quote, QuoteLineItem, QuoteLineItemCreate, QuoteLineItemUpdate,
-  LineItemType, Part, Labor, Miscellaneous, DiscountCode, CostCode,
+  LineItemType, Part, Labor, Miscellaneous, CostCode,
   StagedFulfillment, InvoiceCreate, QuoteEditorMode, StagedEdit, StagedAdd,
   StagedLineItemChange, CommitEditsRequest
 } from "@/types"
-import { Plus, Minus, Trash2, Wrench, Package, FileText, Pencil, Tag, ClipboardCheck, Receipt, Percent, Info, Copy, Car, MapPin, X, Lock, GitCommit, Eye, AlertTriangle, Check, CheckCircle2, Printer, Loader2, Hash } from "lucide-react"
+import { Plus, Minus, Trash2, Wrench, Package, FileText, Pencil, ClipboardCheck, Receipt, Percent, Info, Copy, Car, MapPin, X, Lock, GitCommit, Eye, AlertTriangle, Check, CheckCircle2, Printer, Loader2, Hash } from "lucide-react"
 import { pdf } from '@react-pdf/renderer'
 import { QuotePDF } from '@/components/pdf/QuotePDF'
 import type { CompanySettings, Project, SystemRate } from '@/types'
@@ -63,7 +63,6 @@ import { QuoteAuditTrail } from "./QuoteAuditTrail"
 import { PartForm } from "@/components/forms/PartForm"
 import { LaborForm } from "@/components/forms/LaborForm"
 import { MiscForm } from "@/components/forms/MiscForm"
-import { DiscountCodeForm } from "@/components/forms/DiscountCodeForm"
 import { toast } from "@/hooks/use-toast"
 import {
   getLineItemUnitPrice as _getLineItemUnitPrice,
@@ -105,7 +104,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   const [parts, setParts] = useState<Part[]>([])
   const [laborItems, setLaborItems] = useState<Labor[]>([])
   const [miscItems, setMiscItems] = useState<Miscellaneous[]>([])
-  const [discountCodes, setDiscountCodes] = useState<DiscountCode[]>([])
 
   // Add form fields
   const [selectedPartId, setSelectedPartId] = useState<string>("")
@@ -115,7 +113,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
   // Edit form fields
   const [editQuantity, setEditQuantity] = useState("1")
-  const [editDiscountCodeId, setEditDiscountCodeId] = useState<string>("")
 
   // Staged fulfillments (session only - not persisted until invoice created)
   const [stagedFulfillments, setStagedFulfillments] = useState<Map<number, number>>(new Map())
@@ -149,7 +146,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   const [pmsType, setPmsType] = useState<"percent" | "dollar">("dollar")
   const [pmsValue, setPmsValue] = useState("")
 
-  // Markup Discount Control states (section-level)
+  // Markup Control states (section-level)
   const [markupControlDialogOpen, setMarkupControlDialogOpen] = useState(false)
   const [pendingPartsMarkup, setPendingPartsMarkup] = useState("")
   const [pendingLaborMarkup, setPendingLaborMarkup] = useState("")
@@ -163,11 +160,11 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   const [editingMiscMarkup, setEditingMiscMarkup] = useState("")
   const [updatingMarkupPercent, setUpdatingMarkupPercent] = useState(false)
 
-  // Discount All dialog state
-  const [discountAllDialogOpen, setDiscountAllDialogOpen] = useState(false)
-  const [discountAllSection, setDiscountAllSection] = useState<LineItemType | null>(null)
-  const [selectedBulkDiscountCodeId, setSelectedBulkDiscountCodeId] = useState<string>("")
-  const [applyingDiscount, setApplyingDiscount] = useState(false)
+  // Section Markup dialog state
+  const [sectionMarkupDialogOpen, setSectionMarkupDialogOpen] = useState(false)
+  const [sectionMarkupSection, setSectionMarkupSection] = useState<LineItemType | null>(null)
+  const [sectionMarkupValue, setSectionMarkupValue] = useState("")
+  const [applyingSectionMarkup, setApplyingSectionMarkup] = useState(false)
 
   // Clone quote state
   const [isCloning, setIsCloning] = useState(false)
@@ -252,16 +249,14 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
   const fetchResources = async () => {
     try {
-      const [partsData, laborData, miscData, discountCodesData] = await Promise.all([
+      const [partsData, laborData, miscData] = await Promise.all([
         api.parts.getAll(),
         api.labor.getAll(),
         api.misc.getAll(),
-        api.discountCodes.getAll(false), // Only active codes
       ])
       setParts(partsData)
       setLaborItems(laborData)
       setMiscItems(miscData)
-      setDiscountCodes(discountCodesData)
     } catch (err) {
       console.error("Failed to fetch resources", err)
     }
@@ -309,7 +304,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   const openEditDialog = (item: QuoteLineItem) => {
     setEditingLineItem(item)
     setEditQuantity(item.quantity.toString())
-    setEditDiscountCodeId(item.discount_code_id?.toString() || "none")
     setEditDialogOpen(true)
   }
 
@@ -517,7 +511,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     if (!editingLineItem) return
 
     const newQuantity = parseFloat(editQuantity) || 1
-    const newDiscountCodeId = editDiscountCodeId && editDiscountCodeId !== "none" ? parseInt(editDiscountCodeId) : null
 
     // In edit mode, stage the edit instead of immediate API call
     if (editorMode === "edit") {
@@ -525,9 +518,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
       if (newQuantity !== editingLineItem.quantity) {
         changes.quantity = newQuantity
-      }
-      if (newDiscountCodeId !== editingLineItem.discount_code_id) {
-        changes.discount_code_id = newDiscountCodeId
       }
 
       if (Object.keys(changes).length > 0) {
@@ -542,7 +532,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     // Direct API call when not in edit mode
     const updateData: QuoteLineItemUpdate = {
       quantity: newQuantity,
-      discount_code_id: newDiscountCodeId === null ? 0 : newDiscountCodeId, // 0 to remove
     }
 
     try {
@@ -659,7 +648,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     const isUnchanged =
       (staged.quantity === undefined || staged.quantity === item.quantity) &&
       (staged.unit_price === undefined || staged.unit_price === item.unit_price) &&
-      (staged.discount_code_id === undefined || staged.discount_code_id === item.discount_code_id) &&
       (staged.description === undefined || staged.description === item.description) &&
       (staged.markup_percent === undefined || staged.markup_percent === item.markup_percent)
 
@@ -731,7 +719,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
           labor_id: add.labor_id,
           part_id: add.part_id,
           misc_id: add.misc_id,
-          discount_code_id: add.discount_code_id,
           description: add.description,
           quantity: add.quantity,
           unit_price: add.unit_price,
@@ -747,7 +734,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
           line_item_id: lineItemId,
           quantity: edit.quantity,
           unit_price: edit.unit_price,
-          discount_code_id: edit.discount_code_id === null ? 0 : edit.discount_code_id,
           description: edit.description,
           markup_percent: edit.markup_percent,
         })
@@ -837,17 +823,11 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     }
   }
 
-  // Markup Discount Control handlers
+  // Markup Control handlers
   const handleToggleMarkupControl = () => {
     if (!quote) return
 
     if (!quote.markup_control_enabled) {
-      // Enabling - check for discount codes first
-      const hasDiscounts = quote.line_items.some(item => item.discount_code_id)
-      if (hasDiscounts) {
-        alert("Remove discount codes first to enable this feature")
-        return
-      }
       // Open dialog to get section markup percents
       setPendingPartsMarkup("")
       setPendingLaborMarkup("")
@@ -1119,7 +1099,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     if (!quote) return 0
 
     // Start with existing items, excluding deleted ones
-    let projectedItems: { unitPrice: number; quantity: number; discountPercent: number; isPms: boolean; pmsPercent?: number }[] = []
+    let projectedItems: { unitPrice: number; quantity: number; isPms: boolean; pmsPercent?: number }[] = []
 
     for (const item of quote.line_items) {
       if (stagedDeletes.has(item.id)) continue // Skip deleted items
@@ -1127,12 +1107,10 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       const editedItem = stagedEdits.get(item.id)
       const quantity = editedItem?.quantity ?? item.quantity
       const unitPrice = editedItem?.unit_price ?? getLineItemUnitPrice(item)
-      const discountPercent = item.discount_code?.discount_percent ?? 0
 
       projectedItems.push({
         unitPrice,
         quantity,
-        discountPercent,
         isPms: item.is_pms,
         pmsPercent: item.pms_percent ?? undefined,
       })
@@ -1149,7 +1127,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       projectedItems.push({
         unitPrice,
         quantity: add.quantity,
-        discountPercent: add.discount_code?.discount_percent ?? 0,
         isPms: add.is_pms ?? false,
         pmsPercent: add.pms_percent ?? undefined,
       })
@@ -1159,11 +1136,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     const nonPmsTotal = projectedItems
       .filter(item => !item.isPms)
       .reduce((sum, item) => {
-        let subtotal = item.unitPrice * item.quantity
-        if (item.discountPercent > 0) {
-          subtotal = subtotal * (1 - item.discountPercent / 100)
-        }
-        return sum + subtotal
+        return sum + item.unitPrice * item.quantity
       }, 0)
 
     // Calculate PMS total
@@ -1172,17 +1145,9 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       .reduce((sum, item) => {
         if (item.pmsPercent != null) {
           const unitPrice = nonPmsTotal * item.pmsPercent / 100
-          let subtotal = unitPrice * item.quantity
-          if (item.discountPercent > 0) {
-            subtotal = subtotal * (1 - item.discountPercent / 100)
-          }
-          return sum + subtotal
+          return sum + unitPrice * item.quantity
         }
-        let subtotal = item.unitPrice * item.quantity
-        if (item.discountPercent > 0) {
-          subtotal = subtotal * (1 - item.discountPercent / 100)
-        }
-        return sum + subtotal
+        return sum + item.unitPrice * item.quantity
       }, 0)
 
     return nonPmsTotal + pmsTotal
@@ -1291,11 +1256,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     const stagedQty = stagedFulfillments.get(item.id) || 0
     if (stagedQty === 0) return 0
     const unitPrice = getEffectiveUnitPrice(item)
-    let total = unitPrice * stagedQty
-    if (item.discount_code) {
-      total = total * (1 - item.discount_code.discount_percent / 100)
-    }
-    return total
+    return unitPrice * stagedQty
   }
 
   const getFulfilledLineItemValue = (item: QuoteLineItem): number =>
@@ -1323,11 +1284,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       invoicedQty: quote.line_items.reduce((sum, item) => sum + item.qty_fulfilled, 0),
       invoicedTotal: quote.line_items.reduce((sum, item) => {
         const unitPrice = getEffectiveUnitPrice(item)
-        let total = unitPrice * item.qty_fulfilled
-        if (item.discount_code) {
-          total = total * (1 - item.discount_code.discount_percent / 100)
-        }
-        return sum + total
+        return sum + unitPrice * item.qty_fulfilled
       }, 0)
     }
   }
@@ -1909,38 +1866,42 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     return allFullyStaged ? 'clear' : 'fulfill'
   }
 
-  // Discount All handlers
-  const handleOpenDiscountAll = (itemType: LineItemType) => {
-    setDiscountAllSection(itemType)
-    setSelectedBulkDiscountCodeId("")
-    setDiscountAllDialogOpen(true)
+  // Section Markup handlers
+  const handleOpenSectionMarkup = (itemType: LineItemType) => {
+    setSectionMarkupSection(itemType)
+    // Pre-fill with current section markup value
+    if (quote) {
+      const current = itemType === "part" ? quote.parts_markup_percent
+        : itemType === "labor" ? quote.labor_markup_percent
+        : quote.misc_markup_percent
+      setSectionMarkupValue(current != null ? current.toString() : "")
+    }
+    setSectionMarkupDialogOpen(true)
   }
 
-  const handleApplyDiscountAll = async () => {
-    if (!quote || !discountAllSection || !selectedBulkDiscountCodeId) return
+  const handleApplySectionMarkup = async () => {
+    if (!quote || !sectionMarkupSection) return
+    const markupValue = parseFloat(sectionMarkupValue) || 0
+    if (markupValue < 0) {
+      alert("Markup must be 0 or greater")
+      return
+    }
 
-    setApplyingDiscount(true)
-
-    const itemsToUpdate = quote.line_items.filter(
-      item => item.item_type === discountAllSection
-    )
-
+    setApplyingSectionMarkup(true)
     try {
-      for (const item of itemsToUpdate) {
-        await api.quotes.updateLine(quote.id, item.id, {
-          discount_code_id: selectedBulkDiscountCodeId === "none"
-            ? 0  // 0 to remove discount
-            : parseInt(selectedBulkDiscountCodeId)
-        })
-      }
-
-      await fetchQuote()
-      setDiscountAllDialogOpen(false)
+      await api.quotes.toggleMarkupControl(quoteId, {
+        enabled: true,
+        parts_markup_percent: sectionMarkupSection === "part" ? markupValue : (quote.parts_markup_percent ?? 0),
+        labor_markup_percent: sectionMarkupSection === "labor" ? markupValue : (quote.labor_markup_percent ?? 0),
+        misc_markup_percent: sectionMarkupSection === "misc" ? markupValue : (quote.misc_markup_percent ?? 0),
+      })
+      setSectionMarkupDialogOpen(false)
+      fetchQuote()
       onUpdate?.()
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to apply discounts")
+      alert(err instanceof Error ? err.message : "Failed to apply section markup")
     } finally {
-      setApplyingDiscount(false)
+      setApplyingSectionMarkup(false)
     }
   }
 
@@ -2051,12 +2012,12 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => handleOpenDiscountAll(type)}
-                  disabled={quote?.markup_control_enabled || items.length === 0 || hasBeenInvoiced}
-                  title={hasBeenInvoiced ? "Quote is frozen" : "Apply discount to all items"}
+                  onClick={() => handleOpenSectionMarkup(type)}
+                  disabled={items.length === 0 || hasBeenInvoiced}
+                  title={hasBeenInvoiced ? "Quote is frozen" : "Set markup for this section"}
                 >
-                  <Tag className="h-4 w-4 mr-1" />
-                  Discount All
+                  <Percent className="h-4 w-4 mr-1" />
+                  Set Markup
                 </Button>
                 {extraButtons}
                 <Button
@@ -2091,7 +2052,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                 {editorMode === "invoicing" && (
                   <TableHead className="text-right">Qty to Fulfill</TableHead>
                 )}
-                {/* Edit mode: Qty Fulfilled and Fulfilled Price come before Unit Price/Discount */}
+                {/* Edit mode: Qty Fulfilled and Fulfilled Price come before Unit Price */}
                 {editorMode === "edit" && (
                   <>
                     <TableHead className="text-right">Qty Fulfilled</TableHead>
@@ -2103,8 +2064,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                   <TableHead className="text-right">Markup %</TableHead>
                 )}
                 <TableHead className="text-right">Unit Price</TableHead>
-                <TableHead className="text-center">Discount</TableHead>
-                {/* Non-edit mode: Qty Fulfilled and Fulfilled Price come after Unit Price/Discount */}
+                {/* Non-edit mode: Qty Fulfilled and Fulfilled Price come after Unit Price */}
                 {editorMode !== "edit" && (
                   <>
                     <TableHead className="text-right">Qty Fulfilled</TableHead>
@@ -2224,7 +2184,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       </TableCell>
                     )}
 
-                    {/* Edit mode: Qty Fulfilled and Fulfilled Price come before Unit Price/Discount */}
+                    {/* Edit mode: Qty Fulfilled and Fulfilled Price come before Unit Price */}
                     {editorMode === "edit" && (
                       <>
                         {/* Qty Fulfilled Column */}
@@ -2282,19 +2242,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       )}
                     </TableCell>
 
-                    {/* Discount Column */}
-                    <TableCell className="text-center">
-                      {item.discount_code ? (
-                        <Badge variant="outline" className="gap-1">
-                          <Tag className="h-3 w-3" />
-                          {item.discount_code.code} (-{item.discount_code.discount_percent}%)
-                        </Badge>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-
-                    {/* Non-edit mode: Qty Fulfilled and Fulfilled Price come after Unit Price/Discount */}
+                    {/* Non-edit mode: Qty Fulfilled and Fulfilled Price come after Unit Price */}
                     {editorMode !== "edit" && (
                       <>
                         {/* Qty Fulfilled Column */}
@@ -2321,22 +2269,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     <TableCell className="text-right">
                       {(() => {
                         const unitPrice = useEffectivePricing ? getEffectiveUnitPrice(item) : getLineItemUnitPrice(item)
-                        const subtotal = unitPrice * item.quantity
-                        const total = item.discount_code
-                          ? subtotal * (1 - item.discount_code.discount_percent / 100)
-                          : subtotal
-                        return item.discount_code ? (
-                          <div>
-                            <span className="line-through text-muted-foreground text-sm">
-                              ${subtotal.toFixed(2)}
-                            </span>
-                            <span className="ml-2 font-medium text-green-600 dark:text-green-400">
-                              ${total.toFixed(2)}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="font-medium">${total.toFixed(2)}</span>
-                        )
+                        const total = unitPrice * item.quantity
+                        return <span className="font-medium">${total.toFixed(2)}</span>
                       })()}
                     </TableCell>
                     <TableCell className="text-right space-x-1">
@@ -2474,7 +2408,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     {editorMode === "invoicing" && (
                       <TableCell className="text-right text-muted-foreground">-</TableCell>
                     )}
-                    {/* Edit mode: Qty Fulfilled and Fulfilled Price come before Unit Price/Discount */}
+                    {/* Edit mode: Qty Fulfilled and Fulfilled Price come before Unit Price */}
                     {editorMode === "edit" && (
                       <>
                         {/* Qty Fulfilled */}
@@ -2489,9 +2423,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     )}
                     {/* Unit Price */}
                     <TableCell className="text-right text-green-700 dark:text-green-300 font-medium">${unitPrice.toFixed(2)}</TableCell>
-                    {/* Discount */}
-                    <TableCell className="text-center text-muted-foreground">-</TableCell>
-                    {/* Non-edit mode: Qty Fulfilled and Fulfilled Price come after Unit Price/Discount */}
+                    {/* Non-edit mode: Qty Fulfilled and Fulfilled Price come after Unit Price */}
                     {editorMode !== "edit" && (
                       <>
                         {/* Qty Fulfilled */}
@@ -2537,7 +2469,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       {calculateStagedSectionTotals(items).stagedQty > 0 ? calculateStagedSectionTotals(items).stagedQty : ""}
                     </TableCell>
                   )}
-                  {/* Edit mode: Qty Fulfilled and Fulfilled Price come before Unit Price/Discount */}
+                  {/* Edit mode: Qty Fulfilled and Fulfilled Price come before Unit Price */}
                   {editorMode === "edit" && (
                     <>
                       {/* Qty Fulfilled */}
@@ -2560,9 +2492,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                   )}
                   {/* Unit Price */}
                   <TableCell></TableCell>
-                  {/* Discount */}
-                  <TableCell></TableCell>
-                  {/* Non-edit mode: Qty Fulfilled and Fulfilled Price come after Unit Price/Discount */}
+                  {/* Non-edit mode: Qty Fulfilled and Fulfilled Price come after Unit Price */}
                   {editorMode !== "edit" && (
                     <>
                       {/* Qty Fulfilled */}
@@ -2600,8 +2530,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       {calculateStagedSectionTotals(items).stagedQty}
                     </TableCell>
                     {/* Unit Price */}
-                    <TableCell></TableCell>
-                    {/* Discount */}
                     <TableCell></TableCell>
                     {/* Qty Fulfilled */}
                     <TableCell></TableCell>
@@ -2825,13 +2753,13 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         </CardContent>
       </Card>
 
-      {/* Markup Discount Control */}
+      {/* Markup Control */}
       <Card>
         <CardHeader className="pb-3">
           <div className="flex justify-between items-center">
             <CardTitle className="text-base flex items-center gap-2">
               <Percent className="h-4 w-4" />
-              Markup Discount Control
+              Markup Control
             </CardTitle>
             <div className="flex items-center gap-3">
               {/* Display current section markup badges */}
@@ -2874,7 +2802,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         <CardContent>
           <p className="text-sm text-muted-foreground">
             {quote.markup_control_enabled
-              ? "Section markups are applied to all items. Discount codes are disabled."
+              ? "Section markups are applied to all non-PMS items."
               : "Enable to apply markup percentages per section (Parts, Labour, Misc) to all line items (excluding PMS items)."}
           </p>
         </CardContent>
@@ -3302,7 +3230,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
           <DialogHeader>
             <DialogTitle>Edit Line Item</DialogTitle>
             <DialogDescription>
-              Update the quantity or apply a discount code.
+              Update the quantity for this line item.
             </DialogDescription>
           </DialogHeader>
 
@@ -3329,38 +3257,6 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                 <div className="px-3 py-2 bg-muted/50 rounded-md text-muted-foreground">
                   ${getLineItemUnitPrice(editingLineItem).toFixed(2)}
                 </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Discount Code</Label>
-                {quote?.markup_control_enabled ? (
-                  <div className="px-3 py-2 bg-muted/50 rounded-md text-muted-foreground text-sm">
-                    Discount codes disabled while Markup Control is enabled
-                  </div>
-                ) : (
-                  <SearchableSelect<DiscountCode>
-                    options={[
-                      { value: "none", label: "No discount", description: undefined },
-                      ...discountCodes.map((code): SearchableSelectOption => ({
-                        value: code.id.toString(),
-                        label: code.code,
-                        description: `-${code.discount_percent.toFixed(2)}%`,
-                      }))
-                    ]}
-                    value={editDiscountCodeId}
-                    onChange={setEditDiscountCodeId}
-                    placeholder="No discount"
-                    searchPlaceholder="Search discount codes..."
-                    allowCreate={true}
-                    createLabel="Create New Discount Code"
-                    createDialogTitle="Create New Discount Code"
-                    createForm={<DiscountCodeForm />}
-                    onCreateSuccess={(newCode) => {
-                      setDiscountCodes([...discountCodes, newCode])
-                      setEditDiscountCodeId(newCode.id.toString())
-                    }}
-                  />
-                )}
               </div>
 
               <Button onClick={handleUpdateLineItem} className="w-full">
@@ -3458,7 +3354,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Percent className="h-4 w-4" />
-              Enable Markup Discount Control
+              Enable Markup Control
             </DialogTitle>
             <DialogDescription>
               Set markup percentages per section. These will replace individual item markups (excluding PMS items).
@@ -3682,56 +3578,41 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         </DialogContent>
       </Dialog>
 
-      {/* Discount All Dialog */}
-      <Dialog open={discountAllDialogOpen} onOpenChange={setDiscountAllDialogOpen}>
+      {/* Section Markup Dialog */}
+      <Dialog open={sectionMarkupDialogOpen} onOpenChange={setSectionMarkupDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Tag className="h-4 w-4" />
-              Apply Discount to All {discountAllSection === "labor" ? "Labour" : discountAllSection === "part" ? "Parts" : "Miscellaneous"} Items
+              <Percent className="h-4 w-4" />
+              Set {sectionMarkupSection === "labor" ? "Labour" : sectionMarkupSection === "part" ? "Parts" : "Miscellaneous"} Markup
             </DialogTitle>
             <DialogDescription>
-              Select a discount code to apply to all items in this section.
-              This will replace any existing discounts.
+              Set the markup percentage for all {sectionMarkupSection === "labor" ? "labour" : sectionMarkupSection === "part" ? "parts" : "miscellaneous"} items.
+              {!quote?.markup_control_enabled && " This will enable Markup Control for this quote."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-4">
             <div className="space-y-2">
-              <Label>Discount Code</Label>
-              <Select
-                value={selectedBulkDiscountCodeId}
-                onValueChange={setSelectedBulkDiscountCodeId}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select discount code" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No Discount (Remove All)</SelectItem>
-                  {discountCodes
-                    .filter(dc => !dc.is_archived)
-                    .map(dc => (
-                      <SelectItem key={dc.id} value={dc.id.toString()}>
-                        {dc.code} (-{dc.discount_percent}%)
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+              <Label>Markup (%)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={sectionMarkupValue}
+                onChange={(e) => setSectionMarkupValue(e.target.value)}
+                placeholder="e.g., 15.00"
+              />
             </div>
-            {discountAllSection && (
-              <p className="text-sm text-muted-foreground">
-                This will update {quote?.line_items.filter(i => i.item_type === discountAllSection).length || 0} item(s)
-              </p>
-            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDiscountAllDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setSectionMarkupDialogOpen(false)}>
               Cancel
             </Button>
             <Button
-              onClick={handleApplyDiscountAll}
-              disabled={!selectedBulkDiscountCodeId || applyingDiscount}
+              onClick={handleApplySectionMarkup}
+              disabled={!sectionMarkupValue || applyingSectionMarkup}
             >
-              {applyingDiscount ? "Applying..." : "Apply to All"}
+              {applyingSectionMarkup ? "Applying..." : "Apply Markup"}
             </Button>
           </DialogFooter>
         </DialogContent>

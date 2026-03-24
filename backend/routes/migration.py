@@ -125,7 +125,7 @@ async def import_legacy_data(
     Import legacy UC Vision CSV data.
 
     Accepts multiple CSV files via multipart form upload.
-    Wipes all existing data (except cost_codes, discount_codes, company_settings)
+    Wipes all existing data (except cost_codes, company_settings)
     and imports from the CSV files in FK-dependency order.
     """
     # Read all uploaded files into a dict keyed by filename

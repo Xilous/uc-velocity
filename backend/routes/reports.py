@@ -24,20 +24,13 @@ def _line_item_unit_price(item: QuoteLineItem) -> float:
 
 
 def _line_item_total(item: QuoteLineItem) -> float:
-    """Unit price * quantity, after discount."""
-    subtotal = _line_item_unit_price(item) * item.quantity
-    if item.discount_code:
-        return subtotal * (1 - item.discount_code.discount_percent / 100)
-    return subtotal
+    """Unit price * quantity."""
+    return _line_item_unit_price(item) * item.quantity
 
 
 def _line_item_backlog_value(item: QuoteLineItem) -> float:
-    """Backlog = unit price * qty_pending, after discount."""
-    unit = _line_item_unit_price(item)
-    subtotal = unit * item.qty_pending
-    if item.discount_code:
-        return subtotal * (1 - item.discount_code.discount_percent / 100)
-    return subtotal
+    """Backlog = unit price * qty_pending."""
+    return _line_item_unit_price(item) * item.qty_pending
 
 
 @router.get("/backlog-quotes", response_model=List[BacklogQuoteItem])
@@ -50,7 +43,6 @@ def get_backlog_quotes(db: Session = Depends(get_db)):
             joinedload(Quote.line_items).joinedload(QuoteLineItem.labor),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.part),
             joinedload(Quote.line_items).joinedload(QuoteLineItem.miscellaneous),
-            joinedload(Quote.line_items).joinedload(QuoteLineItem.discount_code),
         )
         .all()
     )
@@ -74,7 +66,6 @@ def get_backlog_quotes(db: Session = Depends(get_db)):
         backlog_lines: List[BacklogLineItem] = []
         backlog_total = 0.0
         for li in pending_items:
-            discount_pct = li.discount_code.discount_percent if li.discount_code else 0.0
             unit = _line_item_unit_price(li)
             value = _line_item_backlog_value(li)
             backlog_total += value
@@ -87,7 +78,6 @@ def get_backlog_quotes(db: Session = Depends(get_db)):
                 qty_fulfilled=li.qty_fulfilled,
                 qty_pending=li.qty_pending,
                 unit_price=round(unit, 2),
-                discount_percent=discount_pct,
                 backlog_value=round(value, 2),
             ))
 
