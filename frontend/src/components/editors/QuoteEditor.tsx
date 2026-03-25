@@ -827,6 +827,11 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   const handleToggleMarkupControl = () => {
     if (!quote) return
 
+    if (hasStagedChanges) {
+      alert("Please commit or discard your staged changes before modifying Markup Control.")
+      return
+    }
+
     if (!quote.markup_control_enabled) {
       // Open dialog to get section markup percents
       setPendingPartsMarkup("")
@@ -896,6 +901,11 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   }
 
   const handleConfirmUpdateMarkup = async () => {
+    if (hasStagedChanges) {
+      alert("Please commit or discard your staged changes before modifying Markup Control.")
+      return
+    }
+
     const partsP = parseFloat(editingPartsMarkup) || 0
     const laborP = parseFloat(editingLaborMarkup) || 0
     const miscP = parseFloat(editingMiscMarkup) || 0
@@ -1881,6 +1891,11 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
   const handleApplySectionMarkup = async () => {
     if (!quote || !sectionMarkupSection) return
+
+    if (hasStagedChanges) {
+      alert("Please commit or discard your staged changes before setting section markup.")
+      return
+    }
     const markupValue = parseFloat(sectionMarkupValue) || 0
     if (markupValue < 0) {
       alert("Markup must be 0 or greater")
