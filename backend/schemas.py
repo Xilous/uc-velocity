@@ -78,7 +78,6 @@ class InvoiceSummaryItem(BaseModel):
     customer_name: str
     client_po_number: Optional[str] = None
     net_sales: float
-    discount_total: float
     hst_amount: float
     grand_total: float
 
@@ -92,7 +91,6 @@ class BacklogLineItem(BaseModel):
     qty_fulfilled: int
     qty_pending: int
     unit_price: float
-    discount_percent: float = 0.0
     backlog_value: float
 
 
@@ -276,30 +274,6 @@ class Miscellaneous(MiscellaneousBase):
         from_attributes = True
 
 
-# ===== Discount Code Schemas =====
-class DiscountCodeBase(BaseModel):
-    code: str  # max 10 chars, validated in route
-    discount_percent: float  # 2 decimal places
-
-
-class DiscountCodeCreate(DiscountCodeBase):
-    pass
-
-
-class DiscountCodeUpdate(BaseModel):
-    code: Optional[str] = None
-    discount_percent: Optional[float] = None
-    is_archived: Optional[bool] = None
-
-
-class DiscountCode(DiscountCodeBase):
-    id: int
-    is_archived: bool
-
-    class Config:
-        from_attributes = True
-
-
 # Part with nested labor items for read operations
 class PartWithLabor(Part):
     labor_items: List[Labor] = []
@@ -429,7 +403,6 @@ class QuoteLineItemBase(BaseModel):
     labor_id: Optional[int] = None
     part_id: Optional[int] = None
     misc_id: Optional[int] = None
-    discount_code_id: Optional[int] = None
     description: Optional[str] = None
     quantity: int = 1  # Must be a positive whole number
     unit_price: Optional[float] = None
@@ -457,7 +430,6 @@ class QuoteLineItemCreate(QuoteLineItemBase):
 class QuoteLineItemUpdate(BaseModel):
     quantity: Optional[int] = None  # Must be a positive whole number
     unit_price: Optional[float] = None
-    discount_code_id: Optional[int] = None
 
     @validator('quantity', pre=True)
     def quantity_must_be_positive_integer(cls, v) -> Optional[int]:
@@ -480,7 +452,6 @@ class QuoteLineItem(QuoteLineItemBase):
     labor: Optional[Labor] = None
     part: Optional[Part] = None
     miscellaneous: Optional[Miscellaneous] = None
-    discount_code: Optional[DiscountCode] = None
 
     class Config:
         from_attributes = True
@@ -778,7 +749,6 @@ class InvoiceLineItemBase(BaseModel):
     labor_id: Optional[int] = None
     part_id: Optional[int] = None
     misc_id: Optional[int] = None
-    discount_code_id: Optional[int] = None
 
     @validator('qty_ordered', 'qty_fulfilled_this_invoice', 'qty_fulfilled_total', 'qty_pending_after', pre=True)
     def quantities_must_be_whole_numbers(cls, v) -> int:
@@ -845,7 +815,6 @@ class QuoteLineItemSnapshotBase(BaseModel):
     labor_id: Optional[int] = None
     part_id: Optional[int] = None
     misc_id: Optional[int] = None
-    discount_code_id: Optional[int] = None
     description: Optional[str] = None
     quantity: int  # Must be whole number
     unit_price: Optional[float] = None
@@ -923,7 +892,6 @@ class StagedLineItemChange(BaseModel):
     labor_id: Optional[int] = None
     part_id: Optional[int] = None
     misc_id: Optional[int] = None
-    discount_code_id: Optional[int] = None
     description: Optional[str] = None
     quantity: Optional[int] = None  # Must be a positive whole number
     unit_price: Optional[float] = None

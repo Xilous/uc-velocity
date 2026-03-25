@@ -17,7 +17,6 @@ import { ThemeToggle } from "@/components/theme-toggle"
 import { ProfilesPage } from "@/pages/ProfilesPage"
 import { ProjectsPage } from "@/pages/ProjectsPage"
 import { ProjectDetailsPage } from "@/pages/ProjectDetailsPage"
-import { DiscountCodesPage } from "@/pages/DiscountCodesPage"
 import { ReportsPage } from "@/pages/ReportsPage"
 import { SettingsPage } from "@/pages/SettingsPage"
 import { MigrationPage } from "@/pages/MigrationPage"
@@ -32,7 +31,6 @@ import {
   Users,
   FolderOpen,
   Boxes,
-  Tag,
   FileText,
   Search,
   BarChart3,
@@ -41,7 +39,7 @@ import {
 } from "lucide-react"
 import { Toaster } from "@/components/ui/toaster"
 
-type AppView = "profiles" | "projects" | "project-details" | "inventory" | "discount-codes" | "reports" | "settings" | "migration"
+type AppView = "profiles" | "projects" | "project-details" | "inventory" | "reports" | "settings" | "migration"
 
 function App() {
   const [currentView, setCurrentView] = useState<AppView>("projects")
@@ -189,9 +187,6 @@ function App() {
 
       case "projects":
         return <ProjectsPage onSelectProject={handleSelectProject} />
-
-      case "discount-codes":
-        return <DiscountCodesPage />
 
       case "reports":
         return <ReportsPage />
@@ -586,14 +581,6 @@ function App() {
             >
               <Boxes className="h-4 w-4" />
               Inventory
-            </Button>
-            <Button
-              variant={currentView === "discount-codes" ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              onClick={() => setCurrentView("discount-codes")}
-            >
-              <Tag className="h-4 w-4" />
-              Discount Codes
             </Button>
             <Button
               variant={currentView === "reports" ? "secondary" : "ghost"}

@@ -385,7 +385,7 @@ function BacklogQuoteRow({
             Ord: {li.quantity} / Ful: {li.qty_fulfilled} / Pend: {li.qty_pending}
           </td>
           <td className="px-3 py-1.5 text-xs text-muted-foreground">
-            {formatCurrency(li.unit_price)}{li.discount_percent > 0 ? ` (-${li.discount_percent}%)` : ''}
+            {formatCurrency(li.unit_price)}
           </td>
           <td />
           <td className="px-3 py-1.5 text-xs text-right text-muted-foreground">

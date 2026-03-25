@@ -7,7 +7,7 @@ from database import get_db
 from models import (
     Quote, QuoteLineItem, Invoice, InvoiceLineItem,
     QuoteSnapshot, QuoteLineItemSnapshot, Labor, Part, Miscellaneous,
-    Project, Profile, DiscountCode, CompanySettings
+    Project, Profile, CompanySettings
 )
 from schemas import (
     Invoice as InvoiceSchema,
@@ -58,21 +58,6 @@ def list_invoices(
             for li in inv.line_items
         )
 
-        # Discount total: we don't have the hydrated discount_code on invoice line items,
-        # so we look up discount percentages for items that have a discount_code_id
-        discount_total = 0.0
-        for li in inv.line_items:
-            if li.discount_code_id:
-                dc = db.query(DiscountCode).filter(DiscountCode.id == li.discount_code_id).first()
-                if dc:
-                    # The stored unit_price already has markup but NOT discount applied
-                    # at invoice snapshot time. However, the invoice creation flow stores
-                    # the final price (after discount) as unit_price. So discount_total
-                    # is informational — we report 0 unless we track it separately.
-                    pass
-        # For now, discount_total stays 0 since invoice unit_price is already net of discount.
-        # This can be enhanced when discount tracking is added to invoice line items.
-
         hst_amount = net_sales * (hst_rate / 100)
 
         results.append(InvoiceSummaryItem(
@@ -83,7 +68,6 @@ def list_invoices(
             customer_name=inv.quote.project.customer.name,
             client_po_number=inv.quote.client_po_number,
             net_sales=net_sales,
-            discount_total=discount_total,
             hst_amount=hst_amount,
             grand_total=net_sales + hst_amount,
         ))

@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine, Base, SessionLocal
-from routes import parts, labor, profiles, projects, quotes, purchase_orders, discount_codes, miscellaneous, invoices, company_settings, reports, cost_codes, vendor_pricebook, migration, system_rates
+from routes import parts, labor, profiles, projects, quotes, purchase_orders, miscellaneous, invoices, company_settings, reports, cost_codes, vendor_pricebook, migration, system_rates
 from seed import seed_system_items
 
 
@@ -106,7 +106,6 @@ app.include_router(profiles.router)
 app.include_router(projects.router)
 app.include_router(quotes.router)
 app.include_router(purchase_orders.router)
-app.include_router(discount_codes.router)
 app.include_router(miscellaneous.router)
 app.include_router(invoices.router)
 app.include_router(company_settings.router)
