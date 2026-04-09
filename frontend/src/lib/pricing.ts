@@ -1,31 +1,41 @@
 import type { QuoteLineItem } from '@/types'
 
 /**
- * Get the unit price for a quote line item, resolving from the linked
- * inventory item (with markup) if no explicit override is set.
+ * Get the base cost (before markup) for a quote line item.
+ * Returns the stored base_cost if available, otherwise resolves from inventory.
+ */
+export function getLineItemBaseCost(item: QuoteLineItem): number {
+  if (item.base_cost != null) return item.base_cost
+  if (item.part) return item.part.cost
+  if (item.labor) return item.labor.hours * item.labor.rate
+  if (item.miscellaneous) return item.miscellaneous.unit_price
+  return 0
+}
+
+/**
+ * Get the unit price (after markup) for a quote line item.
  *
  * Priority:
- * 1. Explicit unit_price override (set by markup control calculation)
- * 2. Line-item markup_percent with base cost (per-item markup)
- * 3. Inventory item's markup (legacy / no line-item markup set)
+ * 1. Dynamic calculation from base_cost + markup_percent (preferred)
+ * 2. Explicit unit_price override
+ * 3. Inventory item's markup (legacy fallback)
  */
 export function getLineItemUnitPrice(item: QuoteLineItem): number {
-  // If explicit unit_price override exists (from markup calculation), use it
+  // Dynamic calculation from base_cost + markup (Issue #60: markup is a
+  // transparent layer on top of an immutable base cost)
+  if (item.base_cost != null && item.markup_percent != null) {
+    return item.base_cost * (1 + item.markup_percent / 100)
+  }
+
+  // Fallback: explicit unit_price override
   if (item.unit_price) return item.unit_price
 
-  // If line-item markup_percent is set, use it with base cost
-  if (item.markup_percent != null) {
-    if (item.part) return item.part.cost * (1 + item.markup_percent / 100)
-    if (item.labor) return item.labor.hours * item.labor.rate * (1 + item.markup_percent / 100)
-    if (item.miscellaneous) return item.miscellaneous.unit_price * (1 + item.markup_percent / 100)
-  }
-
-  // Fall back to inventory item's markup (legacy / no line-item markup set)
-  if (item.labor) {
-    return item.labor.hours * item.labor.rate * (1 + item.labor.markup_percent / 100)
-  }
+  // Legacy fallback: inventory item's markup
   if (item.part) {
     return item.part.cost * (1 + (item.part.markup_percent ?? 0) / 100)
+  }
+  if (item.labor) {
+    return item.labor.hours * item.labor.rate * (1 + item.labor.markup_percent / 100)
   }
   if (item.miscellaneous) {
     return item.miscellaneous.unit_price * (1 + item.miscellaneous.markup_percent / 100)

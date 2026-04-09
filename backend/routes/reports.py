@@ -12,6 +12,9 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 
 def _line_item_unit_price(item: QuoteLineItem) -> float:
     """Resolve effective unit price from the line item or its linked inventory record."""
+    # Prefer dynamic calculation from base_cost + markup (Issue #60)
+    if item.base_cost is not None and item.markup_percent is not None:
+        return item.base_cost * (1 + item.markup_percent / 100)
     if item.unit_price is not None:
         return item.unit_price
     if item.labor:

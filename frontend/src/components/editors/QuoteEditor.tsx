@@ -65,6 +65,7 @@ import { LaborForm } from "@/components/forms/LaborForm"
 import { MiscForm } from "@/components/forms/MiscForm"
 import { toast } from "@/hooks/use-toast"
 import {
+  getLineItemBaseCost,
   getLineItemUnitPrice as _getLineItemUnitPrice,
   getLineItemSubtotal as _getLineItemSubtotal,
   getLineItemTotal as _getLineItemTotal,
@@ -332,6 +333,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
           part_id: part.id,
           quantity: qty,
           unit_price: unitPrice,
+          base_cost: part.cost,
+          markup_percent: part.markup_percent ?? 0,
           part: part, // For display
         })
         setAddDialogOpen(false)
@@ -366,6 +369,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
           labor_id: labor.id,
           quantity: qty,
           unit_price: unitPrice,
+          base_cost: labor.rate * labor.hours,
+          markup_percent: labor.markup_percent,
           labor: labor, // For display
         })
         setAddDialogOpen(false)
@@ -399,6 +404,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
           misc_id: misc.id,
           quantity: qty,
           unit_price: unitPrice,
+          base_cost: misc.unit_price,
+          markup_percent: misc.markup_percent,
           miscellaneous: misc, // For display
         })
         setAddDialogOpen(false)
@@ -433,6 +440,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
         part_id: pendingPart.id,
         quantity: partQuantity,
         unit_price: pendingPart.cost * (1 + (pendingPart.markup_percent ?? 0) / 100),
+        base_cost: pendingPart.cost,
+        markup_percent: pendingPart.markup_percent ?? 0,
         part: pendingPart,
       })
 
@@ -443,6 +452,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
           labor_id: labor.id,
           quantity: partQuantity,
           unit_price: labor.rate * labor.hours * (1 + labor.markup_percent / 100),
+          base_cost: labor.rate * labor.hours,
+          markup_percent: labor.markup_percent,
           labor: labor,
         })
       }
@@ -1038,22 +1049,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
     let totalBaseCost = 0
 
     for (const item of quote.line_items) {
-      let baseCost = 0
-      let markupPercent = 0
-
-      if (item.part) {
-        baseCost = item.part.cost
-        markupPercent = item.part.markup_percent ?? 0
-      } else if (item.labor) {
-        baseCost = item.labor.hours * item.labor.rate
-        markupPercent = item.labor.markup_percent
-      } else if (item.miscellaneous) {
-        baseCost = item.miscellaneous.unit_price
-        markupPercent = item.miscellaneous.markup_percent
-      }
-
-      // Per-line-item markup overrides inventory markup
-      if (item.markup_percent != null) markupPercent = item.markup_percent
+      const baseCost = getLineItemBaseCost(item)
+      let markupPercent = item.markup_percent ?? 0
 
       // PMS items have 0 markup by definition
       if (item.is_pms) {
@@ -1116,7 +1113,12 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
       const editedItem = stagedEdits.get(item.id)
       const quantity = editedItem?.quantity ?? item.quantity
-      const unitPrice = editedItem?.unit_price ?? getLineItemUnitPrice(item)
+      // Calculate unit price from base_cost + markup, accounting for staged markup changes
+      const baseCost = getLineItemBaseCost(item)
+      const markup = editedItem?.markup_percent ?? item.markup_percent ?? 0
+      const unitPrice = item.is_pms
+        ? getLineItemUnitPrice(item)
+        : baseCost * (1 + markup / 100)
 
       projectedItems.push({
         unitPrice,
@@ -1128,12 +1130,17 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
     // Add staged adds
     for (const add of stagedAdds) {
-      let unitPrice = add.unit_price ?? 0
-      if (!add.unit_price) {
-        if (add.labor) unitPrice = add.labor.hours * add.labor.rate * (1 + (add.labor.markup_percent / 100))
-        else if (add.part) unitPrice = add.part.cost * (1 + (add.part.markup_percent / 100))
-        else if (add.miscellaneous) unitPrice = add.miscellaneous.unit_price * (1 + (add.miscellaneous.markup_percent / 100))
-      }
+      const addBaseCost = add.base_cost ?? (
+        add.part ? add.part.cost :
+        add.labor ? add.labor.hours * add.labor.rate :
+        add.miscellaneous ? add.miscellaneous.unit_price : 0
+      )
+      const addMarkup = add.markup_percent ?? (
+        add.part ? (add.part.markup_percent ?? 0) :
+        add.labor ? add.labor.markup_percent :
+        add.miscellaneous ? add.miscellaneous.markup_percent : 0
+      )
+      const unitPrice = addBaseCost * (1 + (addMarkup ?? 0) / 100)
       projectedItems.push({
         unitPrice,
         quantity: add.quantity,
@@ -1175,24 +1182,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
       const editedItem = stagedEdits.get(item.id)
       const quantity = editedItem?.quantity ?? item.quantity
-
-      let baseCost = 0
-      let markupPercent = 0
-
-      if (item.part) {
-        baseCost = item.part.cost
-        markupPercent = item.part.markup_percent ?? 0
-      } else if (item.labor) {
-        baseCost = item.labor.hours * item.labor.rate
-        markupPercent = item.labor.markup_percent
-      } else if (item.miscellaneous) {
-        baseCost = item.miscellaneous.unit_price
-        markupPercent = item.miscellaneous.markup_percent
-      }
-
-      // Per-line-item markup overrides inventory markup; staged edit overrides both
-      if (item.markup_percent != null) markupPercent = item.markup_percent
-      if (editedItem?.markup_percent != null) markupPercent = editedItem.markup_percent
+      const baseCost = getLineItemBaseCost(item)
+      let markupPercent = editedItem?.markup_percent ?? item.markup_percent ?? 0
 
       if (item.is_pms) markupPercent = 0
 
@@ -1203,19 +1194,16 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
     // Staged adds
     for (const add of stagedAdds) {
-      let baseCost = 0
-      let markupPercent = 0
-
-      if (add.part) {
-        baseCost = add.part.cost
-        markupPercent = add.part.markup_percent ?? 0
-      } else if (add.labor) {
-        baseCost = add.labor.hours * add.labor.rate
-        markupPercent = add.labor.markup_percent
-      } else if (add.miscellaneous) {
-        baseCost = add.miscellaneous.unit_price
-        markupPercent = add.miscellaneous.markup_percent
-      }
+      const baseCost = add.base_cost ?? (
+        add.part ? add.part.cost :
+        add.labor ? add.labor.hours * add.labor.rate :
+        add.miscellaneous ? add.miscellaneous.unit_price : 0
+      )
+      let markupPercent = add.markup_percent ?? (
+        add.part ? (add.part.markup_percent ?? 0) :
+        add.labor ? add.labor.markup_percent :
+        add.miscellaneous ? add.miscellaneous.markup_percent : 0
+      ) ?? 0
 
       if (add.is_pms) markupPercent = 0
 
@@ -1372,6 +1360,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
             misc_id: miscId,
             quantity: parkingQty,
             unit_price: parkingPrice,
+            base_cost: parkingRate.unit_price,
+            markup_percent: parkingRate.markup_percent,
             miscellaneous: miscRecord, // For display
           })
         }
@@ -1474,6 +1464,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
             misc_id: miscId,
             quantity: days,
             unit_price: travelPrice,
+            base_cost: selectedRate.unit_price,
+            markup_percent: selectedRate.markup_percent,
             miscellaneous: miscRecord, // For display
           })
         }
@@ -2067,15 +2059,19 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                 {editorMode === "invoicing" && (
                   <TableHead className="text-right">Qty to Fulfill</TableHead>
                 )}
-                {/* Edit mode: Qty Fulfilled and Fulfilled Price come before Unit Price */}
+                {/* Edit mode: Qty Fulfilled and Fulfilled Price come before pricing columns */}
                 {editorMode === "edit" && (
                   <>
                     <TableHead className="text-right">Qty Fulfilled</TableHead>
                     <TableHead className="text-right">Fulfilled Price</TableHead>
                   </>
                 )}
-                {/* Markup % column - edit mode only, when global toggle is OFF */}
-                {editorMode === "edit" && !quote?.markup_control_enabled && (
+                {/* Base Cost column - edit mode only */}
+                {editorMode === "edit" && (
+                  <TableHead className="text-right">Base Cost</TableHead>
+                )}
+                {/* Markup % column - always visible; editable in edit mode when global toggle is OFF */}
+                {!quote?.markup_control_enabled && (
                   <TableHead className="text-right">Markup %</TableHead>
                 )}
                 <TableHead className="text-right">Unit Price</TableHead>
@@ -2222,39 +2218,51 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       </>
                     )}
 
-                    {/* Markup % Column — inline editable when global toggle is OFF */}
-                    {editorMode === "edit" && !quote?.markup_control_enabled && (
+                    {/* Base Cost Column — edit mode only, read-only */}
+                    {editorMode === "edit" && (
+                      <TableCell className="text-right text-muted-foreground">
+                        {item.is_pms ? '-' : `$${getLineItemBaseCost(item).toFixed(2)}`}
+                      </TableCell>
+                    )}
+
+                    {/* Markup % Column — always visible; editable in edit mode when global toggle is OFF */}
+                    {!quote?.markup_control_enabled && (
                       <TableCell className="text-right">
                         {item.is_pms ? (
                           <span className="text-muted-foreground">-</span>
-                        ) : (
+                        ) : editorMode === "edit" ? (
                           <Input
                             type="number"
                             step="0.01"
                             min="0"
                             className="w-20 h-7 text-right text-sm inline-block"
-                            value={editedItem?.markup_percent ?? item.markup_percent ?? (
-                              item.part ? (item.part.markup_percent ?? 0) :
-                              item.labor ? item.labor.markup_percent :
-                              item.miscellaneous ? item.miscellaneous.markup_percent : 0
-                            )}
+                            value={editedItem?.markup_percent ?? item.markup_percent ?? 0}
                             onChange={(e) => {
                               const val = e.target.value === "" ? 0 : parseFloat(e.target.value)
                               if (!isNaN(val)) stageEdit(item, { markup_percent: val })
                             }}
                             disabled={isDeleted || hasBeenInvoiced}
                           />
+                        ) : (
+                          <span>{item.markup_percent ?? 0}%</span>
                         )}
                       </TableCell>
                     )}
 
-                    {/* Unit Price Column */}
+                    {/* Unit Price Column — dynamically calculated from base_cost + markup */}
                     <TableCell className="text-right">
-                      {editedItem?.unit_price !== undefined && editedItem.unit_price !== getLineItemUnitPrice(item) ? (
-                        <span className="font-bold text-blue-600 dark:text-blue-400">${editedItem.unit_price.toFixed(2)}</span>
-                      ) : (
-                        `$${(useEffectivePricing ? getEffectiveUnitPrice(item) : getLineItemUnitPrice(item)).toFixed(2)}`
-                      )}
+                      {(() => {
+                        const baseCost = getLineItemBaseCost(item)
+                        const markup = editedItem?.markup_percent ?? item.markup_percent ?? 0
+                        const price = item.is_pms
+                          ? (useEffectivePricing ? getEffectiveUnitPrice(item) : getLineItemUnitPrice(item))
+                          : baseCost * (1 + markup / 100)
+                        const hasMarkupChange = editedItem?.markup_percent !== undefined
+                        const hasUnitPriceChange = editedItem?.unit_price !== undefined && editedItem.unit_price !== getLineItemUnitPrice(item)
+                        return (hasMarkupChange || hasUnitPriceChange)
+                          ? <span className="font-bold text-blue-600 dark:text-blue-400">${price.toFixed(2)}</span>
+                          : `$${price.toFixed(2)}`
+                      })()}
                     </TableCell>
 
                     {/* Non-edit mode: Qty Fulfilled and Fulfilled Price come after Unit Price */}
@@ -2280,11 +2288,16 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       </>
                     )}
 
-                    {/* Total Column */}
+                    {/* Total Column — uses staged markup for live preview */}
                     <TableCell className="text-right">
                       {(() => {
-                        const unitPrice = useEffectivePricing ? getEffectiveUnitPrice(item) : getLineItemUnitPrice(item)
-                        const total = unitPrice * item.quantity
+                        const baseCost = getLineItemBaseCost(item)
+                        const markup = editedItem?.markup_percent ?? item.markup_percent ?? 0
+                        const unitPrice = item.is_pms
+                          ? (useEffectivePricing ? getEffectiveUnitPrice(item) : getLineItemUnitPrice(item))
+                          : baseCost * (1 + markup / 100)
+                        const quantity = editedItem?.quantity ?? item.quantity
+                        const total = unitPrice * quantity
                         return <span className="font-medium">${total.toFixed(2)}</span>
                       })()}
                     </TableCell>
@@ -2389,14 +2402,23 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                   if (add.item_type === "misc" && add.miscellaneous) return add.miscellaneous.description
                   return "New item"
                 }
-                const getAddUnitPrice = () => {
-                  if (add.unit_price !== undefined) return add.unit_price
-                  if (add.item_type === "labor" && add.labor) return add.labor.hours * add.labor.rate * (1 + (add.labor.markup_percent / 100))
-                  if (add.item_type === "part" && add.part) return add.part.cost * (1 + (add.part.markup_percent / 100))
-                  if (add.item_type === "misc" && add.miscellaneous) return add.miscellaneous.unit_price * (1 + (add.miscellaneous.markup_percent / 100))
+                const getAddBaseCost = () => {
+                  if (add.base_cost !== undefined) return add.base_cost
+                  if (add.item_type === "part" && add.part) return add.part.cost
+                  if (add.item_type === "labor" && add.labor) return add.labor.hours * add.labor.rate
+                  if (add.item_type === "misc" && add.miscellaneous) return add.miscellaneous.unit_price
                   return 0
                 }
-                const unitPrice = getAddUnitPrice()
+                const getAddMarkup = () => {
+                  if (add.markup_percent !== undefined) return add.markup_percent
+                  if (add.item_type === "part" && add.part) return add.part.markup_percent ?? 0
+                  if (add.item_type === "labor" && add.labor) return add.labor.markup_percent
+                  if (add.item_type === "misc" && add.miscellaneous) return add.miscellaneous.markup_percent
+                  return 0
+                }
+                const addBaseCost = getAddBaseCost()
+                const addMarkup = getAddMarkup()
+                const unitPrice = addBaseCost * (1 + addMarkup / 100)
                 const total = unitPrice * add.quantity
                 return (
                   <TableRow
@@ -2432,9 +2454,13 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                         <TableCell className="text-right text-muted-foreground">-</TableCell>
                       </>
                     )}
-                    {/* Markup % — placeholder for staged adds */}
-                    {editorMode === "edit" && !quote?.markup_control_enabled && (
-                      <TableCell className="text-right text-muted-foreground">-</TableCell>
+                    {/* Base Cost — for staged adds */}
+                    {editorMode === "edit" && (
+                      <TableCell className="text-right text-muted-foreground">${addBaseCost.toFixed(2)}</TableCell>
+                    )}
+                    {/* Markup % — for staged adds */}
+                    {!quote?.markup_control_enabled && (
+                      <TableCell className="text-right text-green-700 dark:text-green-300">{addMarkup}%</TableCell>
                     )}
                     {/* Unit Price */}
                     <TableCell className="text-right text-green-700 dark:text-green-300 font-medium">${unitPrice.toFixed(2)}</TableCell>
@@ -2501,8 +2527,12 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       </TableCell>
                     </>
                   )}
+                  {/* Base Cost — empty in footer */}
+                  {editorMode === "edit" && (
+                    <TableCell></TableCell>
+                  )}
                   {/* Markup % — empty in footer */}
-                  {editorMode === "edit" && !quote?.markup_control_enabled && (
+                  {!quote?.markup_control_enabled && (
                     <TableCell></TableCell>
                   )}
                   {/* Unit Price */}
@@ -2544,6 +2574,10 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     <TableCell className="text-right font-semibold text-green-700 dark:text-green-300">
                       {calculateStagedSectionTotals(items).stagedQty}
                     </TableCell>
+                    {/* Markup % */}
+                    {!quote?.markup_control_enabled && (
+                      <TableCell></TableCell>
+                    )}
                     {/* Unit Price */}
                     <TableCell></TableCell>
                     {/* Qty Fulfilled */}

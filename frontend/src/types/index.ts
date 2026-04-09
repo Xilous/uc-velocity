@@ -732,6 +732,8 @@ export interface StagedAdd {
   unit_price?: number;
   is_pms?: boolean;
   pms_percent?: number;
+  markup_percent?: number;  // Per-item markup (from inventory or section)
+  base_cost?: number;  // Base cost before markup
   // Hydrated references for display (populated when staging)
   labor?: Labor;
   part?: Part;
