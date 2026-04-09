@@ -2066,10 +2066,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     <TableHead className="text-right">Fulfilled Price</TableHead>
                   </>
                 )}
-                {/* Base Cost column - edit mode only */}
-                {editorMode === "edit" && (
-                  <TableHead className="text-right">Base Cost</TableHead>
-                )}
+                {/* Base Cost column - always visible */}
+                <TableHead className="text-right">Base Cost</TableHead>
                 {/* Markup % column - always visible; editable in edit mode when global toggle is OFF */}
                 {!quote?.markup_control_enabled && (
                   <TableHead className="text-right">Markup %</TableHead>
@@ -2218,12 +2216,10 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       </>
                     )}
 
-                    {/* Base Cost Column — edit mode only, read-only */}
-                    {editorMode === "edit" && (
-                      <TableCell className="text-right text-muted-foreground">
-                        {item.is_pms ? '-' : `$${getLineItemBaseCost(item).toFixed(2)}`}
-                      </TableCell>
-                    )}
+                    {/* Base Cost Column — always visible, read-only */}
+                    <TableCell className="text-right text-muted-foreground">
+                      {item.is_pms ? '-' : `$${getLineItemBaseCost(item).toFixed(2)}`}
+                    </TableCell>
 
                     {/* Markup % Column — always visible; editable in edit mode when global toggle is OFF */}
                     {!quote?.markup_control_enabled && (
@@ -2455,9 +2451,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       </>
                     )}
                     {/* Base Cost — for staged adds */}
-                    {editorMode === "edit" && (
-                      <TableCell className="text-right text-muted-foreground">${addBaseCost.toFixed(2)}</TableCell>
-                    )}
+                    <TableCell className="text-right text-muted-foreground">${addBaseCost.toFixed(2)}</TableCell>
                     {/* Markup % — for staged adds */}
                     {!quote?.markup_control_enabled && (
                       <TableCell className="text-right text-green-700 dark:text-green-300">{addMarkup}%</TableCell>
@@ -2528,9 +2522,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     </>
                   )}
                   {/* Base Cost — empty in footer */}
-                  {editorMode === "edit" && (
-                    <TableCell></TableCell>
-                  )}
+                  <TableCell></TableCell>
                   {/* Markup % — empty in footer */}
                   {!quote?.markup_control_enabled && (
                     <TableCell></TableCell>
@@ -2574,6 +2566,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     <TableCell className="text-right font-semibold text-green-700 dark:text-green-300">
                       {calculateStagedSectionTotals(items).stagedQty}
                     </TableCell>
+                    {/* Base Cost */}
+                    <TableCell></TableCell>
                     {/* Markup % */}
                     {!quote?.markup_control_enabled && (
                       <TableCell></TableCell>
