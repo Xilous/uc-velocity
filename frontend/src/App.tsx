@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { Show, SignInButton, SignUpButton, UserButton } from "@clerk/react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import {
@@ -540,6 +541,27 @@ function App() {
   }
 
   return (
+    <>
+    <Show when="signed-out">
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center space-y-6">
+          <div>
+            <h1 className="text-3xl font-bold">UC Velocity</h1>
+            <p className="text-muted-foreground">ERP System</p>
+          </div>
+          <div className="flex gap-3 justify-center">
+            <SignInButton mode="modal">
+              <Button>Sign In</Button>
+            </SignInButton>
+            <SignUpButton mode="modal">
+              <Button variant="outline">Sign Up</Button>
+            </SignUpButton>
+          </div>
+        </div>
+      </div>
+    </Show>
+
+    <Show when="signed-in">
     <div className="min-h-screen bg-background flex">
       {/* Sidebar */}
       <aside className="w-64 border-r bg-card flex flex-col">
@@ -549,7 +571,10 @@ function App() {
               <h1 className="text-xl font-bold">UC Velocity</h1>
               <p className="text-sm text-muted-foreground">ERP System</p>
             </div>
-            <ThemeToggle />
+            <div className="flex items-center gap-1">
+              <ThemeToggle />
+              <UserButton />
+            </div>
           </div>
         </div>
 
@@ -681,6 +706,8 @@ function App() {
 
       <Toaster />
     </div>
+    </Show>
+    </>
   )
 }
 
