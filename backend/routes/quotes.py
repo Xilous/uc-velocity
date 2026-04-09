@@ -1099,6 +1099,11 @@ def commit_edits(
                 item_changes.append("updated description")
                 line_item.description = change.description
 
+            # Update base_cost (unit cost) if provided
+            if change.base_cost is not None and change.base_cost != line_item.base_cost:
+                item_changes.append(f"unit cost: ${line_item.base_cost or 0:.2f} → ${change.base_cost:.2f}")
+                line_item.base_cost = change.base_cost
+
             # Update markup_percent if provided (only when global toggle is OFF)
             if change.markup_percent is not None and change.markup_percent != line_item.markup_percent:
                 if quote.markup_control_enabled:
@@ -1106,13 +1111,15 @@ def commit_edits(
                         status_code=400,
                         detail="Cannot change per-item markup while Markup Control is enabled"
                     )
-                item_changes.append(f"markup: {line_item.markup_percent or 0:.1f}% -> {change.markup_percent:.1f}%")
+                item_changes.append(f"markup: {line_item.markup_percent or 0:.1f}% → {change.markup_percent:.1f}%")
                 line_item.markup_percent = change.markup_percent
-                # Recalculate unit_price from base_cost
+
+            # Recalculate unit_price whenever base_cost or markup_percent changed
+            if change.base_cost is not None or change.markup_percent is not None:
                 if line_item.base_cost is None:
                     line_item.base_cost = calculate_base_cost(line_item, db)
                 if line_item.base_cost:
-                    line_item.unit_price = line_item.base_cost * (1 + change.markup_percent / 100)
+                    line_item.unit_price = line_item.base_cost * (1 + (line_item.markup_percent or 0) / 100)
 
             if item_changes:
                 change_descriptions.append(f"{item_desc}: {', '.join(item_changes)}")

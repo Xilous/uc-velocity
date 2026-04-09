@@ -688,6 +688,7 @@ export interface StagedLineItemChange {
   is_pms?: boolean;
   pms_percent?: number;
   markup_percent?: number;  // Per-line-item markup
+  base_cost?: number;  // Unit cost override
 }
 
 export interface CommitEditsRequest {
@@ -715,6 +716,7 @@ export interface StagedEdit {
   unit_price?: number;
   description?: string;
   markup_percent?: number;
+  base_cost?: number;  // Unit cost override
 }
 
 /**
