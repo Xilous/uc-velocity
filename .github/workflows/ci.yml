@@ -85,6 +85,27 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Verify Dockerfile exposes all VITE_ env vars
+        working-directory: .
+        run: |
+          # Find all VITE_ env vars referenced in frontend source code
+          SOURCE_VARS=$(grep -roh 'import\.meta\.env\.VITE_[A-Z_]*' frontend/src/ | sort -u | sed 's/import\.meta\.env\.//')
+          # Find all VITE_ ARGs declared in the Dockerfile
+          DOCKER_ARGS=$(grep '^ARG VITE_' frontend/Dockerfile | sed 's/^ARG //' | sort -u)
+          MISSING=""
+          for var in $SOURCE_VARS; do
+            if ! echo "$DOCKER_ARGS" | grep -qx "$var"; then
+              MISSING="$MISSING  - $var\n"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::Dockerfile is missing ARG declarations for VITE_ vars used in source:"
+            printf "$MISSING"
+            echo "Add these to frontend/Dockerfile so Railway passes them at build time."
+            exit 1
+          fi
+          echo "All VITE_ env vars have matching Dockerfile ARGs."
+
   migration-integrity:
     name: Migration Integrity
     runs-on: ubuntu-latest
