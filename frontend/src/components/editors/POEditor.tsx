@@ -559,7 +559,7 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
   const handleSaveExpectedDeliveryDate = async () => {
     setSavingDeliveryDate(true)
     try {
-      await api.purchaseOrders.update(poId, { expected_delivery_date: expectedDeliveryDate || null })
+      await api.purchaseOrders.update(poId, { expected_delivery_date: expectedDeliveryDate ? `${expectedDeliveryDate}T00:00:00` : null })
       setIsEditingDeliveryDate(false)
       fetchPO()
       onUpdate?.()
