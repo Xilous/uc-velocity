@@ -46,6 +46,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Calendar as CalendarWidget } from "@/components/ui/calendar"
 import type { SearchableSelectOption } from "@/components/ui/searchable-select"
 import { api } from "@/api/client"
 import type {
@@ -1379,6 +1381,27 @@ export function POEditor({ poId, onUpdate, onSelectPO, onDirtyStateChange }: POE
                     onChange={(e) => setExpectedDeliveryDate(e.target.value)}
                     className="max-w-xs"
                   />
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" size="sm" className="h-9 w-9 p-0">
+                        <Calendar className="h-4 w-4" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <CalendarWidget
+                        mode="single"
+                        selected={expectedDeliveryDate ? new Date(expectedDeliveryDate + "T00:00:00") : undefined}
+                        onSelect={(date) => {
+                          if (date) {
+                            const yyyy = date.getFullYear()
+                            const mm = String(date.getMonth() + 1).padStart(2, "0")
+                            const dd = String(date.getDate()).padStart(2, "0")
+                            setExpectedDeliveryDate(`${yyyy}-${mm}-${dd}`)
+                          }
+                        }}
+                      />
+                    </PopoverContent>
+                  </Popover>
                   <Button
                     size="sm"
                     onClick={handleSaveExpectedDeliveryDate}
