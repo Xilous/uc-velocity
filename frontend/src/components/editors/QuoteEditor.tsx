@@ -660,7 +660,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
       (staged.quantity === undefined || staged.quantity === item.quantity) &&
       (staged.unit_price === undefined || staged.unit_price === item.unit_price) &&
       (staged.description === undefined || staged.description === item.description) &&
-      (staged.markup_percent === undefined || staged.markup_percent === item.markup_percent)
+      (staged.markup_percent === undefined || staged.markup_percent === item.markup_percent) &&
+      (staged.base_cost === undefined || staged.base_cost === item.base_cost)
 
     if (isUnchanged) {
       newStagedEdits.delete(item.id)
@@ -747,6 +748,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
           unit_price: edit.unit_price,
           description: edit.description,
           markup_percent: edit.markup_percent,
+          base_cost: edit.base_cost,
         })
       }
 
@@ -1041,7 +1043,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
   }
 
   // Calculate weighted average markup percentage
-  // Formula: Σ(Markup% × Base Cost × Qty) / Σ(Base Cost × Qty)
+  // Formula: Σ(Markup% × Unit Cost × Qty) / Σ(Unit Cost × Qty)
   const calculateAverageMarkup = (): number => {
     if (!quote || quote.line_items.length === 0) return 0
 
@@ -1113,8 +1115,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
       const editedItem = stagedEdits.get(item.id)
       const quantity = editedItem?.quantity ?? item.quantity
-      // Calculate unit price from base_cost + markup, accounting for staged markup changes
-      const baseCost = getLineItemBaseCost(item)
+      // Calculate unit price from unit cost + markup, accounting for staged changes
+      const baseCost = editedItem?.base_cost ?? getLineItemBaseCost(item)
       const markup = editedItem?.markup_percent ?? item.markup_percent ?? 0
       const unitPrice = item.is_pms
         ? getLineItemUnitPrice(item)
@@ -1182,7 +1184,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
 
       const editedItem = stagedEdits.get(item.id)
       const quantity = editedItem?.quantity ?? item.quantity
-      const baseCost = getLineItemBaseCost(item)
+      const baseCost = editedItem?.base_cost ?? getLineItemBaseCost(item)
       let markupPercent = editedItem?.markup_percent ?? item.markup_percent ?? 0
 
       if (item.is_pms) markupPercent = 0
@@ -2066,8 +2068,8 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     <TableHead className="text-right">Fulfilled Price</TableHead>
                   </>
                 )}
-                {/* Base Cost column - always visible */}
-                <TableHead className="text-right">Base Cost</TableHead>
+                {/* Unit Cost column - always visible */}
+                <TableHead className="text-right">Unit Cost</TableHead>
                 {/* Markup % column - always visible; editable in edit mode when global toggle is OFF */}
                 {!quote?.markup_control_enabled && (
                   <TableHead className="text-right">Markup %</TableHead>
@@ -2216,9 +2218,26 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       </>
                     )}
 
-                    {/* Base Cost Column — always visible, read-only */}
-                    <TableCell className="text-right text-muted-foreground">
-                      {item.is_pms ? '-' : `$${getLineItemBaseCost(item).toFixed(2)}`}
+                    {/* Unit Cost Column — always visible; editable in edit mode */}
+                    <TableCell className="text-right">
+                      {item.is_pms ? (
+                        <span className="text-muted-foreground">-</span>
+                      ) : editorMode === "edit" ? (
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className="w-24 h-7 text-right text-sm inline-block"
+                          value={editedItem?.base_cost ?? getLineItemBaseCost(item)}
+                          onChange={(e) => {
+                            const val = e.target.value === "" ? 0 : parseFloat(e.target.value)
+                            if (!isNaN(val)) stageEdit(item, { base_cost: val })
+                          }}
+                          disabled={isDeleted || hasBeenInvoiced}
+                        />
+                      ) : (
+                        <span className="text-muted-foreground">${getLineItemBaseCost(item).toFixed(2)}</span>
+                      )}
                     </TableCell>
 
                     {/* Markup % Column — always visible; editable in edit mode when global toggle is OFF */}
@@ -2245,17 +2264,16 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       </TableCell>
                     )}
 
-                    {/* Unit Price Column — dynamically calculated from base_cost + markup */}
+                    {/* Unit Price Column — dynamically calculated from unit cost + markup */}
                     <TableCell className="text-right">
                       {(() => {
-                        const baseCost = getLineItemBaseCost(item)
+                        const baseCost = editedItem?.base_cost ?? getLineItemBaseCost(item)
                         const markup = editedItem?.markup_percent ?? item.markup_percent ?? 0
                         const price = item.is_pms
                           ? (useEffectivePricing ? getEffectiveUnitPrice(item) : getLineItemUnitPrice(item))
                           : baseCost * (1 + markup / 100)
-                        const hasMarkupChange = editedItem?.markup_percent !== undefined
-                        const hasUnitPriceChange = editedItem?.unit_price !== undefined && editedItem.unit_price !== getLineItemUnitPrice(item)
-                        return (hasMarkupChange || hasUnitPriceChange)
+                        const hasPricingChange = editedItem?.markup_percent !== undefined || editedItem?.base_cost !== undefined
+                        return hasPricingChange
                           ? <span className="font-bold text-blue-600 dark:text-blue-400">${price.toFixed(2)}</span>
                           : `$${price.toFixed(2)}`
                       })()}
@@ -2284,10 +2302,10 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       </>
                     )}
 
-                    {/* Total Column — uses staged markup for live preview */}
+                    {/* Total Column — uses staged unit cost and markup for live preview */}
                     <TableCell className="text-right">
                       {(() => {
-                        const baseCost = getLineItemBaseCost(item)
+                        const baseCost = editedItem?.base_cost ?? getLineItemBaseCost(item)
                         const markup = editedItem?.markup_percent ?? item.markup_percent ?? 0
                         const unitPrice = item.is_pms
                           ? (useEffectivePricing ? getEffectiveUnitPrice(item) : getLineItemUnitPrice(item))
@@ -2450,7 +2468,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                         <TableCell className="text-right text-muted-foreground">-</TableCell>
                       </>
                     )}
-                    {/* Base Cost — for staged adds */}
+                    {/* Unit Cost — for staged adds */}
                     <TableCell className="text-right text-muted-foreground">${addBaseCost.toFixed(2)}</TableCell>
                     {/* Markup % — for staged adds */}
                     {!quote?.markup_control_enabled && (
@@ -2521,7 +2539,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                       </TableCell>
                     </>
                   )}
-                  {/* Base Cost — empty in footer */}
+                  {/* Unit Cost — empty in footer */}
                   <TableCell></TableCell>
                   {/* Markup % — empty in footer */}
                   {!quote?.markup_control_enabled && (
@@ -2566,7 +2584,7 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     <TableCell className="text-right font-semibold text-green-700 dark:text-green-300">
                       {calculateStagedSectionTotals(items).stagedQty}
                     </TableCell>
-                    {/* Base Cost */}
+                    {/* Unit Cost */}
                     <TableCell></TableCell>
                     {/* Markup % */}
                     {!quote?.markup_control_enabled && (
@@ -2928,10 +2946,10 @@ export function QuoteEditor({ quoteId, onUpdate, onSelectQuote }: QuoteEditorPro
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs">
                       <p className="text-xs">
-                        Weighted Average = Σ(Markup% × Base Cost × Qty) / Σ(Base Cost × Qty)
+                        Weighted Average = Σ(Markup% × Unit Cost × Qty) / Σ(Unit Cost × Qty)
                       </p>
                       <p className="text-xs mt-1 text-muted-foreground">
-                        Parts: Base Cost = Part Cost | Labor: Hours × Rate | Misc: Unit Price
+                        Parts: Unit Cost = Part Cost | Labor: Hours × Rate | Misc: Unit Price
                       </p>
                     </TooltipContent>
                   </Tooltip>

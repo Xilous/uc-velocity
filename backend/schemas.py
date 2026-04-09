@@ -898,6 +898,7 @@ class StagedLineItemChange(BaseModel):
     is_pms: bool = False
     pms_percent: Optional[float] = None
     markup_percent: Optional[float] = None  # Per-line-item markup
+    base_cost: Optional[float] = None  # Unit cost override
 
     @validator('quantity', pre=True)
     def quantity_must_be_positive_integer(cls, v) -> Optional[int]:
