@@ -107,7 +107,7 @@ def upgrade():
         UPDATE quote_line_items
         SET markup_percent = CASE
             WHEN base_cost > 0 AND unit_price IS NOT NULL AND unit_price > 0
-                THEN ROUND(((unit_price / base_cost) - 1) * 100, 2)
+                THEN ROUND(((unit_price / base_cost) - 1)::numeric * 100, 2)::float
             ELSE 0
         END
         WHERE markup_percent IS NULL
@@ -200,7 +200,7 @@ def upgrade():
         UPDATE quote_line_item_snapshots
         SET markup_percent = CASE
             WHEN base_cost > 0 AND unit_price IS NOT NULL AND unit_price > 0
-                THEN ROUND(((unit_price / base_cost) - 1) * 100, 2)
+                THEN ROUND(((unit_price / base_cost) - 1)::numeric * 100, 2)::float
             ELSE 0
         END
         WHERE markup_percent IS NULL
