@@ -748,14 +748,23 @@ def add_quote_line(quote_id: int, line_data: QuoteLineItemCreate, db: Session = 
     db.add(db_line)
     db.flush()  # Need ID for calculate_base_cost
 
-    # If markup control is enabled, apply section markup to new items
-    if quote.markup_control_enabled and not line_data.is_pms:
-        db_line.original_markup_percent = get_original_markup(db_line, db)
+    # Always compute and store base_cost and markup_percent (Issue #60)
+    if not line_data.is_pms:
         db_line.base_cost = calculate_base_cost(db_line, db)
-        section_markup = _get_section_markup_from_quote(db_line.item_type, quote)
-        db_line.markup_percent = section_markup
+        db_line.original_markup_percent = get_original_markup(db_line, db)
+
+        if quote.markup_control_enabled:
+            section_markup = _get_section_markup_from_quote(db_line.item_type, quote)
+            db_line.markup_percent = section_markup
+        else:
+            db_line.markup_percent = db_line.original_markup_percent
+
+        # unit_price is always derived from base_cost + markup
         if db_line.base_cost:
-            db_line.unit_price = db_line.base_cost * (1 + section_markup / 100)
+            db_line.unit_price = db_line.base_cost * (1 + (db_line.markup_percent or 0) / 100)
+    else:
+        db_line.base_cost = 0
+        db_line.markup_percent = 0
 
     # Create snapshot after adding line item
     item_desc = get_line_item_description(db_line, db)
@@ -1026,20 +1035,23 @@ def commit_edits(
             db.add(new_item)
             db.flush()
 
-            # Compute and store base_cost and markup_percent
+            # Always compute and store base_cost and markup_percent (Issue #60)
             if not change.is_pms:
                 new_item.base_cost = calculate_base_cost(new_item, db)
                 new_item.original_markup_percent = get_original_markup(new_item, db)
 
                 if quote.markup_control_enabled:
-                    # Use section-level markup
                     section_markup = _get_section_markup_from_quote(new_item.item_type, quote)
                     new_item.markup_percent = section_markup
-                    if new_item.base_cost:
-                        new_item.unit_price = new_item.base_cost * (1 + section_markup / 100)
                 else:
-                    # Use the inventory item's markup_percent
                     new_item.markup_percent = new_item.original_markup_percent
+
+                # unit_price is always derived from base_cost + markup
+                if new_item.base_cost:
+                    new_item.unit_price = new_item.base_cost * (1 + (new_item.markup_percent or 0) / 100)
+            else:
+                new_item.base_cost = 0
+                new_item.markup_percent = 0
 
             item_desc = get_line_item_description(new_item, db)
             change_descriptions.append(f"Added {item_desc} (qty: {quantity})")
