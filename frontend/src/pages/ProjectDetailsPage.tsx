@@ -281,20 +281,20 @@ export function ProjectDetailsPage({ projectId, onBack, initialDoc }: ProjectDet
             </h2>
           </div>
 
-          <ScrollArea className="flex-1">
-            <div className="p-4 space-y-4">
-              {/* Quotes Section */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-medium flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    Quotes
-                  </h3>
-                  <Button size="sm" variant="ghost" onClick={() => setQuoteDialogOpen(true)}>
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="space-y-1">
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+            {/* Quotes Section */}
+            <div className="flex-1 flex flex-col min-h-0 p-4 pb-2">
+              <div className="flex items-center justify-between mb-2 flex-none">
+                <h3 className="text-sm font-medium flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Quotes
+                </h3>
+                <Button size="sm" variant="ghost" onClick={() => setQuoteDialogOpen(true)}>
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              <ScrollArea className="flex-1 min-h-0">
+                <div className="space-y-1 pr-2">
                   {project.quotes.length === 0 ? (
                     <p className="text-xs text-muted-foreground py-2">No quotes yet</p>
                   ) : (
@@ -339,22 +339,24 @@ export function ProjectDetailsPage({ projectId, onBack, initialDoc }: ProjectDet
                     ))
                   )}
                 </div>
+              </ScrollArea>
+            </div>
+
+            <Separator className="flex-none" />
+
+            {/* Purchase Orders Section */}
+            <div className="flex-1 flex flex-col min-h-0 p-4 py-2">
+              <div className="flex items-center justify-between mb-2 flex-none">
+                <h3 className="text-sm font-medium flex items-center gap-2">
+                  <ShoppingCart className="h-4 w-4" />
+                  Purchase Orders
+                </h3>
+                <Button size="sm" variant="ghost" onClick={() => setPoDialogOpen(true)}>
+                  <Plus className="h-4 w-4" />
+                </Button>
               </div>
-
-              <Separator />
-
-              {/* Purchase Orders Section */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-medium flex items-center gap-2">
-                    <ShoppingCart className="h-4 w-4" />
-                    Purchase Orders
-                  </h3>
-                  <Button size="sm" variant="ghost" onClick={() => setPoDialogOpen(true)}>
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="space-y-1">
+              <ScrollArea className="flex-1 min-h-0">
+                <div className="space-y-1 pr-2">
                   {project.purchase_orders.length === 0 ? (
                     <p className="text-xs text-muted-foreground py-2">No purchase orders yet</p>
                   ) : (
@@ -386,19 +388,21 @@ export function ProjectDetailsPage({ projectId, onBack, initialDoc }: ProjectDet
                     ))
                   )}
                 </div>
+              </ScrollArea>
+            </div>
+
+            <Separator className="flex-none" />
+
+            {/* Invoices Section */}
+            <div className="flex-1 flex flex-col min-h-0 p-4 pt-2">
+              <div className="flex items-center justify-between mb-2 flex-none">
+                <h3 className="text-sm font-medium flex items-center gap-2">
+                  <Receipt className="h-4 w-4" />
+                  Invoices
+                </h3>
               </div>
-
-              <Separator />
-
-              {/* Invoices Section */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-medium flex items-center gap-2">
-                    <Receipt className="h-4 w-4" />
-                    Invoices
-                  </h3>
-                </div>
-                <div className="space-y-1">
+              <ScrollArea className="flex-1 min-h-0">
+                <div className="space-y-1 pr-2">
                   {invoices.length === 0 ? (
                     <p className="text-xs text-muted-foreground py-2">No invoices yet</p>
                   ) : (
@@ -436,9 +440,9 @@ export function ProjectDetailsPage({ projectId, onBack, initialDoc }: ProjectDet
                     ))
                   )}
                 </div>
-              </div>
+              </ScrollArea>
             </div>
-          </ScrollArea>
+          </div>
         </div>
 
         {/* Document Editor */}
