@@ -18,6 +18,7 @@ class CompanySettingsBase(BaseModel):
     gst_number: Optional[str] = None
     hst_rate: float = 13.0
     default_pms_percent: Optional[float] = None
+    logo_data_url: Optional[str] = None
 
 
 class CompanySettingsUpdate(BaseModel):
@@ -28,6 +29,7 @@ class CompanySettingsUpdate(BaseModel):
     gst_number: Optional[str] = None
     hst_rate: Optional[float] = None
     default_pms_percent: Optional[float] = None
+    logo_data_url: Optional[str] = None
 
 
 class CompanySettings(CompanySettingsBase):

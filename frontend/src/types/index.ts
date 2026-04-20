@@ -10,6 +10,7 @@ export interface CompanySettings {
   gst_number?: string;
   hst_rate: number;
   default_pms_percent?: number | null;
+  logo_data_url?: string | null;
 }
 
 export interface CompanySettingsUpdate {
@@ -20,6 +21,7 @@ export interface CompanySettingsUpdate {
   gst_number?: string;
   hst_rate?: number;
   default_pms_percent?: number | null;
+  logo_data_url?: string | null;
 }
 
 // ===== System Rates =====
