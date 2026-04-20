@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, Enum, Table, DateTime, Boolean, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, Enum, Table, DateTime, Boolean, UniqueConstraint, Text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -426,6 +426,7 @@ class CompanySettings(Base):
     gst_number = Column(String)
     hst_rate = Column(Float, default=13.0)
     default_pms_percent = Column(Float, nullable=True)
+    logo_data_url = Column(Text, nullable=True)
 
 
 class QuoteLineItemSnapshot(Base):

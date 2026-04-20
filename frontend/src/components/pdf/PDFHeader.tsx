@@ -16,7 +16,7 @@ export function PDFHeader({ companySettings, title, children }: PDFHeaderProps) 
       <View style={styles.headerRow}>
         {/* Left: Logo + Company Info */}
         <View style={styles.headerLeft}>
-          <Image src={logo} style={styles.logo} />
+          <Image src={companySettings.logo_data_url || logo} style={styles.logo} />
           <View style={styles.companyInfo}>
             <Text style={styles.companyName}>{companySettings.name}</Text>
             {companySettings.address && <Text>{companySettings.address}</Text>}

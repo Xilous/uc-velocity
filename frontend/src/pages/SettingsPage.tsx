@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { api } from '@/api/client'
 import type { CompanySettings, CompanySettingsUpdate, CostCode, CostCodeCreate, SystemRate, SystemRateCreate, SystemRateUpdate } from '@/types'
-import { Loader2, Save, Pencil, Trash2, Plus, X, Check } from 'lucide-react'
+import { Loader2, Save, Pencil, Trash2, Plus, X, Check, Upload } from 'lucide-react'
 
 // Inline editing row state
 interface CostCodeEditState {
@@ -80,6 +80,10 @@ export function SettingsPage() {
   // PMS default state
   const [pmsDefault, setPmsDefault] = useState('')
 
+  // Company logo state (base64 data URL)
+  const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
   useEffect(() => {
     fetchSettings()
     fetchCostCodes()
@@ -100,11 +104,41 @@ export function SettingsPage() {
       setGstNumber(data.gst_number || '')
       setHstRate(String(data.hst_rate ?? 13.0))
       setPmsDefault(data.default_pms_percent != null ? String(data.default_pms_percent) : '')
+      setLogoDataUrl(data.logo_data_url ?? null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings')
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const MAX_BYTES = 2 * 1024 * 1024
+    if (file.size > MAX_BYTES) {
+      setError('Logo image must be 2MB or smaller.')
+      e.target.value = ''
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setLogoDataUrl(reader.result)
+        setError(null)
+      }
+    }
+    reader.onerror = () => {
+      setError('Failed to read logo image.')
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
+
+  const handleRemoveLogo = () => {
+    setLogoDataUrl(null)
   }
 
   const fetchCostCodes = async () => {
@@ -295,6 +329,7 @@ export function SettingsPage() {
         gst_number: gstNumber,
         hst_rate: hstValue,
         default_pms_percent: pmsValue,
+        logo_data_url: logoDataUrl,
       }
       const data = await api.companySettings.update(update)
       setSettings(data)
@@ -475,6 +510,42 @@ export function SettingsPage() {
                 value={fax}
                 onChange={(e) => setFax(e.target.value)}
               />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Company Logo</Label>
+            <div className="flex items-start gap-4">
+              <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-md border bg-muted/30 overflow-hidden">
+                {logoDataUrl ? (
+                  <img src={logoDataUrl} alt="Company logo" className="max-h-full max-w-full object-contain" />
+                ) : (
+                  <span className="text-xs text-muted-foreground">No logo</span>
+                )}
+              </div>
+              <div className="space-y-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={handleLogoChange}
+                  className="hidden"
+                />
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} className="gap-1">
+                    <Upload className="h-3.5 w-3.5" />
+                    {logoDataUrl ? 'Replace logo' : 'Upload logo'}
+                  </Button>
+                  {logoDataUrl && (
+                    <Button type="button" variant="ghost" size="sm" onClick={handleRemoveLogo}>
+                      Remove
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  PNG, JPEG, or WebP. Max 2MB. Appears on quote, invoice, and PO PDFs. Click "Save Settings" below to apply.
+                </p>
+              </div>
             </div>
           </div>
         </CardContent>
