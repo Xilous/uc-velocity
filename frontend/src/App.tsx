@@ -45,6 +45,10 @@ type AppView = "profiles" | "projects" | "project-details" | "inventory" | "repo
 function App() {
   const [currentView, setCurrentView] = useState<AppView>("projects")
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null)
+  // Projects page search term — lifted here so it survives drilling into a project and coming back.
+  const [projectSearchTerm, setProjectSearchTerm] = useState("")
+  // When navigating into a project from a search-result chip, seed the editor to open that doc directly.
+  const [pendingInitialDoc, setPendingInitialDoc] = useState<{ type: "quote" | "po"; id: number } | null>(null)
 
   // Inventory state
   const [parts, setParts] = useState<Part[]>([])
@@ -172,12 +176,20 @@ function App() {
   }
 
   const handleSelectProject = (projectId: number) => {
+    setPendingInitialDoc(null)
+    setSelectedProjectId(projectId)
+    setCurrentView("project-details")
+  }
+
+  const handleSelectChildDoc = (projectId: number, doc: { type: "quote" | "po"; id: number }) => {
+    setPendingInitialDoc(doc)
     setSelectedProjectId(projectId)
     setCurrentView("project-details")
   }
 
   const handleBackToProjects = () => {
     setSelectedProjectId(null)
+    setPendingInitialDoc(null)
     setCurrentView("projects")
   }
 
@@ -187,7 +199,14 @@ function App() {
         return <ProfilesPage />
 
       case "projects":
-        return <ProjectsPage onSelectProject={handleSelectProject} />
+        return (
+          <ProjectsPage
+            onSelectProject={handleSelectProject}
+            onSelectChildDoc={handleSelectChildDoc}
+            searchTerm={projectSearchTerm}
+            onSearchTermChange={setProjectSearchTerm}
+          />
+        )
 
       case "reports":
         return <ReportsPage />
@@ -207,6 +226,7 @@ function App() {
           <ProjectDetailsPage
             projectId={selectedProjectId}
             onBack={handleBackToProjects}
+            initialDoc={pendingInitialDoc}
           />
         )
 
@@ -585,6 +605,7 @@ function App() {
               className="w-full justify-start gap-2"
               onClick={() => {
                 setSelectedProjectId(null)
+                setPendingInitialDoc(null)
                 setCurrentView("projects")
               }}
             >
