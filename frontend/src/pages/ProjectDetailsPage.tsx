@@ -50,16 +50,21 @@ import {
 interface ProjectDetailsPageProps {
   projectId: number
   onBack: () => void
+  initialDoc?: { type: "quote" | "po"; id: number } | null
 }
 
 type DocumentType = "quote" | "po" | "invoice"
 type SelectedDocument = { type: DocumentType; id: number } | null
 
-export function ProjectDetailsPage({ projectId, onBack }: ProjectDetailsPageProps) {
+export function ProjectDetailsPage({ projectId, onBack, initialDoc }: ProjectDetailsPageProps) {
   const [project, setProject] = useState<ProjectFull | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedDoc, setSelectedDoc] = useState<SelectedDocument>(null)
+  // Seed once from initialDoc on mount so deep-links from search open the right doc.
+  // Further navigation inside the page should not be overridden by prop changes.
+  const [selectedDoc, setSelectedDoc] = useState<SelectedDocument>(() =>
+    initialDoc ? { type: initialDoc.type, id: initialDoc.id } : null
+  )
 
   // Unsaved changes navigation guard
   const editorDirtyRef = useRef(false)

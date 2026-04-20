@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { Fragment, useState, useEffect, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -19,27 +19,42 @@ import {
 } from "@/components/ui/table"
 import { ProjectForm } from "@/components/forms/ProjectForm"
 import { api } from "@/api/client"
-import type { Project } from "@/types"
-import { Plus, Trash2, Pencil, FolderOpen, Search } from "lucide-react"
+import type { Project, Quote, PurchaseOrder } from "@/types"
+import { Plus, Trash2, Pencil, FolderOpen, Search, FileText, ShoppingCart } from "lucide-react"
 
 interface ProjectsPageProps {
   onSelectProject: (projectId: number) => void
+  onSelectChildDoc: (projectId: number, doc: { type: "quote" | "po"; id: number }) => void
+  searchTerm: string
+  onSearchTermChange: (value: string) => void
 }
 
-export function ProjectsPage({ onSelectProject }: ProjectsPageProps) {
+export function ProjectsPage({
+  onSelectProject,
+  onSelectChildDoc,
+  searchTerm,
+  onSearchTermChange,
+}: ProjectsPageProps) {
   const [projects, setProjects] = useState<Project[]>([])
+  const [quotes, setQuotes] = useState<Quote[]>([])
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
-  const [searchTerm, setSearchTerm] = useState("")
 
   const fetchData = async () => {
     setLoading(true)
     setError(null)
     try {
-      const data = await api.projects.getAll()
-      setProjects(data)
+      const [projectsData, quotesData, posData] = await Promise.all([
+        api.projects.getAll(),
+        api.quotes.getAll(),
+        api.purchaseOrders.getAll(),
+      ])
+      setProjects(projectsData)
+      setQuotes(quotesData)
+      setPurchaseOrders(posData)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch projects")
     } finally {
@@ -93,18 +108,74 @@ export function ProjectsPage({ onSelectProject }: ProjectsPageProps) {
     }
   }
 
-  const filteredProjects = projects.filter((project) => {
-    const term = searchTerm.toLowerCase()
-    if (!term) return true
-    return (
-      project.name.toLowerCase().includes(term) ||
-      project.uca_project_number.toLowerCase().includes(term) ||
-      (project.ucsh_project_number?.toLowerCase().includes(term) ?? false) ||
-      project.customer.name.toLowerCase().includes(term) ||
-      (project.project_lead?.toLowerCase().includes(term) ?? false) ||
-      project.status.toLowerCase().includes(term)
-    )
-  })
+  const quotesByProject = useMemo(() => {
+    const map = new Map<number, Quote[]>()
+    for (const q of quotes) {
+      const arr = map.get(q.project_id) ?? []
+      arr.push(q)
+      map.set(q.project_id, arr)
+    }
+    return map
+  }, [quotes])
+
+  const posByProject = useMemo(() => {
+    const map = new Map<number, PurchaseOrder[]>()
+    for (const po of purchaseOrders) {
+      const arr = map.get(po.project_id) ?? []
+      arr.push(po)
+      map.set(po.project_id, arr)
+    }
+    return map
+  }, [purchaseOrders])
+
+  // Cross-entity search: a project is kept if it matches directly OR any of its
+  // quotes/POs match. When kept via children, we record which ones matched so
+  // the user can click straight into that doc.
+  const { filteredProjects, matchesByProject } = useMemo(() => {
+    const term = searchTerm.toLowerCase().trim()
+    if (!term) {
+      return {
+        filteredProjects: projects,
+        matchesByProject: new Map<number, { quotes: Quote[]; pos: PurchaseOrder[] }>(),
+      }
+    }
+    const matches = new Map<number, { quotes: Quote[]; pos: PurchaseOrder[] }>()
+    const filtered = projects.filter((project) => {
+      const directMatch =
+        project.name.toLowerCase().includes(term) ||
+        project.uca_project_number.toLowerCase().includes(term) ||
+        (project.ucsh_project_number?.toLowerCase().includes(term) ?? false) ||
+        project.customer.name.toLowerCase().includes(term) ||
+        (project.project_lead?.toLowerCase().includes(term) ?? false) ||
+        project.status.toLowerCase().includes(term)
+
+      const projectQuotes = quotesByProject.get(project.id) ?? []
+      const projectPOs = posByProject.get(project.id) ?? []
+
+      const matchedQuotes = projectQuotes.filter(
+        (q) =>
+          q.quote_number.toLowerCase().includes(term) ||
+          (q.client_po_number?.toLowerCase().includes(term) ?? false) ||
+          (q.work_description?.toLowerCase().includes(term) ?? false),
+      )
+      const matchedPOs = projectPOs.filter(
+        (po) =>
+          po.po_number.toLowerCase().includes(term) ||
+          po.vendor.name.toLowerCase().includes(term) ||
+          (po.vendor_po_number?.toLowerCase().includes(term) ?? false) ||
+          (po.work_description?.toLowerCase().includes(term) ?? false),
+      )
+
+      if (directMatch || matchedQuotes.length > 0 || matchedPOs.length > 0) {
+        if (matchedQuotes.length > 0 || matchedPOs.length > 0) {
+          matches.set(project.id, { quotes: matchedQuotes, pos: matchedPOs })
+        }
+        return true
+      }
+      return false
+    })
+    return { filteredProjects: filtered, matchesByProject: matches }
+  }, [projects, quotesByProject, posByProject, searchTerm])
 
   return (
     <div className="space-y-6">
@@ -125,12 +196,12 @@ export function ProjectsPage({ onSelectProject }: ProjectsPageProps) {
         </div>
       )}
 
-      <div className="relative max-w-sm">
+      <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search projects..."
+          placeholder="Search projects, POs, quotes, vendors..."
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={(e) => onSearchTermChange(e.target.value)}
           className="pl-9"
         />
       </div>
@@ -159,45 +230,87 @@ export function ProjectsPage({ onSelectProject }: ProjectsPageProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredProjects.map((project) => (
-                <TableRow
-                  key={project.id}
-                  className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => onSelectProject(project.id)}
-                >
-                  <TableCell className="font-mono text-sm">{project.uca_project_number}</TableCell>
-                  <TableCell className="text-muted-foreground">{project.ucsh_project_number || "-"}</TableCell>
-                  <TableCell className="font-medium">
-                    <div className="flex items-center gap-2">
-                      <FolderOpen className="h-4 w-4 text-muted-foreground" />
-                      {project.name}
-                    </div>
-                  </TableCell>
-                  <TableCell>{project.customer.name}</TableCell>
-                  <TableCell className="text-muted-foreground">{project.project_lead || "-"}</TableCell>
-                  <TableCell>{getStatusBadge(project.status)}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {new Date(project.created_on).toLocaleDateString()}
-                  </TableCell>
-                  <TableCell className="text-right space-x-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => handleEdit(project, e)}
+              {filteredProjects.map((project) => {
+                const childMatches = matchesByProject.get(project.id)
+                return (
+                  <Fragment key={project.id}>
+                    <TableRow
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => onSelectProject(project.id)}
                     >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => handleDelete(project.id, e)}
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
+                      <TableCell className="font-mono text-sm">{project.uca_project_number}</TableCell>
+                      <TableCell className="text-muted-foreground">{project.ucsh_project_number || "-"}</TableCell>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          <FolderOpen className="h-4 w-4 text-muted-foreground" />
+                          {project.name}
+                        </div>
+                      </TableCell>
+                      <TableCell>{project.customer.name}</TableCell>
+                      <TableCell className="text-muted-foreground">{project.project_lead || "-"}</TableCell>
+                      <TableCell>{getStatusBadge(project.status)}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {new Date(project.created_on).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell className="text-right space-x-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => handleEdit(project, e)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => handleDelete(project.id, e)}
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                    {childMatches && (
+                      <TableRow className="bg-muted/30 hover:bg-muted/30">
+                        <TableCell colSpan={8} className="py-2">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground pl-6">
+                            <span className="uppercase tracking-wide">Matches:</span>
+                            {childMatches.quotes.map((q) => (
+                              <Badge
+                                key={`q-${q.id}`}
+                                variant="outline"
+                                className="cursor-pointer gap-1 font-mono hover:bg-background"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  onSelectChildDoc(project.id, { type: "quote", id: q.id })
+                                }}
+                              >
+                                <FileText className="h-3 w-3" />
+                                {q.quote_number}
+                              </Badge>
+                            ))}
+                            {childMatches.pos.map((po) => (
+                              <Badge
+                                key={`po-${po.id}`}
+                                variant="outline"
+                                className="cursor-pointer gap-1 font-mono hover:bg-background"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  onSelectChildDoc(project.id, { type: "po", id: po.id })
+                                }}
+                              >
+                                <ShoppingCart className="h-3 w-3" />
+                                {po.po_number}
+                                <span className="text-muted-foreground font-sans">— {po.vendor.name}</span>
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
+                )
+              })}
             </TableBody>
           </Table>
         )}
